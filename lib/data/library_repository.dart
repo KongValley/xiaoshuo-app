@@ -40,54 +40,116 @@ class ImportSummary {
   bool get isEmpty => added.isEmpty && skipped.isEmpty && failures.isEmpty;
 }
 
+/// What [LibraryRepository.init] had to repair. The shelf mentions it once so
+/// a recovered library is never a silent surprise.
+class RecoveryReport {
+  const RecoveryReport({
+    this.usedBackupIndex = false,
+    this.recoveredBooks = 0,
+  });
+
+  /// The main index could not be read and the backup copy was used instead.
+  final bool usedBackupIndex;
+
+  /// Book folders that were on disk but missing from the index.
+  final int recoveredBooks;
+
+  bool get hasRecovery => usedBackupIndex || recoveredBooks > 0;
+}
+
 /// The local book library. Books are copied into the app's own data folder so
 /// they remain available even if the original TXT is moved or deleted.
+///
+/// The shelf is described by `library.json`, which is written through a
+/// temporary file and mirrored to `library.json.bak`. Every book folder also
+/// carries its own `book.json`, so a lost index can always be rebuilt from
+/// what is on disk.
 class LibraryRepository extends ChangeNotifier {
   LibraryRepository({
     required Directory root,
     this.parseInIsolate = true,
   })  : _root = root,
         _booksDir = Directory(p.join(root.path, 'books')),
-        _libraryFile = File(p.join(root.path, 'library.json'));
+        _libraryFile = File(p.join(root.path, 'library.json')),
+        _backupFile = File(p.join(root.path, 'library.json.bak'));
 
   final Directory _root;
   final Directory _booksDir;
   final File _libraryFile;
+  final File _backupFile;
   final bool parseInIsolate;
 
   final List<Book> _books = [];
+  final Set<String> _dirtyBooks = {};
   Timer? _saveTimer;
   Future<void> _writeChain = Future<void>.value();
   bool _loaded = false;
+  String? _lastIndexPayload;
+  RecoveryReport _recovery = const RecoveryReport();
 
   List<Book> get books => List<Book>.unmodifiable(_books);
 
   Directory get booksDirectory => _booksDir;
 
+  RecoveryReport get recovery => _recovery;
+
   Future<void> init() async {
     await _booksDir.create(recursive: true);
-    final books = <Book>[];
+
+    var books = <Book>[];
+    var usedBackup = false;
     try {
-      if (await _libraryFile.exists()) {
-        final raw = await _libraryFile.readAsString(encoding: utf8);
-        final decoded = jsonDecode(raw);
-        if (decoded is Map && decoded['books'] is List) {
-          for (final item in decoded['books'] as List) {
-            if (item is! Map) continue;
-            final book = Book.fromJson(item.cast<String, dynamic>());
-            if (book.id.isEmpty) continue;
-            if (!_contentFile(book.id).existsSync()) continue;
-            if (!_chaptersFile(book.id).existsSync()) continue;
-            books.add(book);
-          }
-        }
-      }
+      books = await _readIndex(_libraryFile);
     } catch (_) {
-      // Start with an empty shelf if the index cannot be read.
+      // Unreadable or half-written: fall back to the backup copy.
+      try {
+        books = await _readIndex(_backupFile);
+        usedBackup = true;
+      } catch (_) {
+        // Both copies are unusable; the book folders are the last resort.
+      }
     }
+
+    // Drop entries whose text was removed outside the app.
+    final known = <String>{};
+    for (final book in books) {
+      if (!await _hasBookFiles(book.id)) continue;
+      known.add(book.id);
+    }
+    books = [for (final book in books) if (known.contains(book.id)) book];
+
+    // Folders the index does not know about are books it lost. Every folder
+    // has its own metadata file, so they can simply be taken back in.
+    final orphans = <String>[];
+    await for (final entity in _booksDir.list(followLinks: false)) {
+      if (entity is! Directory) continue;
+      final id = p.basename(entity.path);
+      if (known.contains(id) || !await _hasBookFiles(id)) continue;
+      orphans.add(id);
+    }
+    orphans.sort();
+    var recovered = 0;
+    for (final id in orphans) {
+      final book = await _recoverBook(id, ++recovered);
+      if (book == null) {
+        recovered--;
+        continue;
+      }
+      books.add(book);
+    }
+
+    _recovery = RecoveryReport(
+      usedBackupIndex: usedBackup,
+      recoveredBooks: recovered,
+    );
     _books
       ..clear()
       ..addAll(books);
+    // Books imported before `book.json` existed get one now.
+    _dirtyBooks.clear();
+    for (final book in _books) {
+      if (!_sidecarFile(book.id).existsSync()) _dirtyBooks.add(book.id);
+    }
     _loaded = true;
     await _persistNow();
     notifyListeners();
@@ -104,16 +166,15 @@ class LibraryRepository extends ChangeNotifier {
 
   File _chaptersFile(String id) => File(p.join(_booksDir.path, id, 'chapters.json'));
 
+  File _sidecarFile(String id) => File(p.join(_booksDir.path, id, 'book.json'));
+
+  Future<bool> _hasBookFiles(String id) async =>
+      await _contentFile(id).exists() && await _chaptersFile(id).exists();
+
   Future<BookText> loadBookText(Book book) async {
-    final contentFile = _contentFile(book.id);
-    final chaptersFile = _chaptersFile(book.id);
-    final content = await contentFile.readAsString(encoding: utf8);
-    final chaptersRaw = await chaptersFile.readAsString(encoding: utf8);
-    final decoded = jsonDecode(chaptersRaw);
-    final index = decoded is Map
-        ? ChapterIndex.fromJson(decoded.cast<String, dynamic>())
-        : const ChapterIndex(totalChars: 0, chapters: []);
-    return BookText(content: content, chapters: index.chapters);
+    final content = await _contentFile(book.id).readAsString(encoding: utf8);
+    final index = await _readChapterIndex(_chaptersFile(book.id));
+    return BookText(content: content, chapters: index?.chapters ?? const []);
   }
 
   /// Imports the given TXT paths. Parsing happens in a background isolate so
@@ -193,6 +254,7 @@ class LibraryRepository extends ChangeNotifier {
           progress: const ReadingProgress(),
         );
         _books.add(book);
+        _dirtyBooks.add(id);
         added.add(book);
         _schedulePersist();
         notifyListeners();
@@ -215,6 +277,7 @@ class LibraryRepository extends ChangeNotifier {
     final index = _books.indexWhere((item) => item.id == book.id);
     if (index < 0) return;
     _books[index] = _books[index].copyWith(lastOpenedAt: DateTime.now());
+    _dirtyBooks.add(book.id);
     notifyListeners();
     _schedulePersist();
   }
@@ -240,12 +303,14 @@ class LibraryRepository extends ChangeNotifier {
       lastChapterTitle: chapterTitle,
       lastOpenedAt: DateTime.now(),
     );
+    _dirtyBooks.add(bookId);
     notifyListeners();
     _schedulePersist();
   }
 
   Future<void> deleteBook(Book book) async {
     _books.removeWhere((item) => item.id == book.id);
+    _dirtyBooks.remove(book.id);
     notifyListeners();
     await _persistNow();
     final dir = Directory(p.join(_booksDir.path, book.id));
@@ -260,6 +325,10 @@ class LibraryRepository extends ChangeNotifier {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Persistence
+  // ---------------------------------------------------------------------------
+
   void _schedulePersist() {
     if (!_loaded) return;
     _saveTimer?.cancel();
@@ -273,10 +342,30 @@ class LibraryRepository extends ChangeNotifier {
       'version': 1,
       'books': [for (final book in _books) book.toJson()],
     });
+    final indexChanged = payload != _lastIndexPayload;
+    // Anything marked after this point is written by the next pass.
+    final dirty = _dirtyBooks.toList();
+    _dirtyBooks.clear();
     _writeChain = _writeChain.then((_) async {
       try {
         await _root.create(recursive: true);
-        await _libraryFile.writeAsString(payload, encoding: utf8, flush: true);
+        if (indexChanged) {
+          await _writeIndex(payload);
+          _lastIndexPayload = payload;
+        }
+        for (final id in dirty) {
+          final index = _books.indexWhere((book) => book.id == id);
+          if (index < 0) continue;
+          try {
+            await _sidecarFile(id).writeAsString(
+              jsonEncode(_books[index].toJson()),
+              encoding: utf8,
+              flush: true,
+            );
+          } catch (_) {
+            // The index is the primary record; a stale copy is tolerable.
+          }
+        }
       } catch (_) {
         // Keep the in-memory library usable.
       }
@@ -285,6 +374,103 @@ class LibraryRepository extends ChangeNotifier {
   }
 
   Future<void> flush() => _persistNow();
+
+  /// Writes the index through a temporary file so a crash can never leave a
+  /// half-written index behind, then refreshes the backup copy. The backup is
+  /// only taken once the new index is complete, so it always matches the last
+  /// successful save.
+  Future<void> _writeIndex(String payload) async {
+    final temp = File('${_libraryFile.path}.tmp');
+    await temp.writeAsString(payload, encoding: utf8, flush: true);
+    try {
+      await temp.rename(_libraryFile.path);
+    } on FileSystemException {
+      // Windows can refuse the rename while another program holds the file
+      // open. Overwriting in place still beats losing the save.
+      await _libraryFile.writeAsString(payload, encoding: utf8, flush: true);
+      try {
+        await temp.delete();
+      } catch (_) {
+        // Harmless leftover.
+      }
+    }
+    try {
+      await _libraryFile.copy(_backupFile.path);
+    } catch (_) {
+      // A missing backup only matters if the next write is interrupted.
+    }
+  }
+
+  /// Throws when the file is missing, truncated or not an index at all.
+  Future<List<Book>> _readIndex(File file) async {
+    final raw = await file.readAsString(encoding: utf8);
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map || decoded['books'] is! List) {
+      throw const FormatException('书库索引格式不正确');
+    }
+    final books = <Book>[];
+    for (final item in decoded['books'] as List) {
+      if (item is! Map) continue;
+      final book = Book.fromJson(item.cast<String, dynamic>());
+      if (book.id.isNotEmpty) books.add(book);
+    }
+    return books;
+  }
+
+  /// Returns null when the chapter index is missing, broken or empty.
+  Future<ChapterIndex?> _readChapterIndex(File file) async {
+    try {
+      final raw = await file.readAsString(encoding: utf8);
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final index = ChapterIndex.fromJson(decoded.cast<String, dynamic>());
+      return index.chapters.isEmpty ? null : index;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Rebuilds the metadata of a book folder the index does not know about.
+  /// Folders always carry their own `book.json`; only ones written before that
+  /// file existed end up with a placeholder title and no reading progress.
+  Future<Book?> _recoverBook(String id, int sequence) async {
+    Book? book;
+    try {
+      final raw = await _sidecarFile(id).readAsString(encoding: utf8);
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        final candidate = Book.fromJson(decoded.cast<String, dynamic>());
+        if (candidate.chapterCount > 0) book = candidate;
+      }
+    } catch (_) {
+      // No usable sidecar; rebuild from the chapter index below.
+    }
+
+    if (book == null) {
+      final index = await _readChapterIndex(_chaptersFile(id));
+      if (index == null) return null;
+      final content = _contentFile(id);
+      final size = await content.length();
+      final stamp = await content.lastModified();
+      book = Book(
+        id: id,
+        title: sequence == 1 ? '找回的书籍' : '找回的书籍 $sequence',
+        author: '',
+        fileName: '',
+        encoding: '未知',
+        charCount: index.totalChars,
+        chapterCount: index.chapters.length,
+        fileSize: size,
+        importedAt: stamp,
+        lastOpenedAt: stamp,
+        lastChapterTitle: index.chapters.first.title,
+        progress: const ReadingProgress(),
+      );
+    }
+    if (book.id != id) book = book.copyWith(id: id);
+    _dirtyBooks.add(id);
+    return book;
+  }
 
   String _newId() {
     final random = Random.secure().nextInt(0xFFFFFF).toRadixString(16);

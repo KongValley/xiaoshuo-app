@@ -86,6 +86,7 @@ class Book {
   String get displayAuthor => author.trim().isEmpty ? '佚名' : author.trim();
 
   Book copyWith({
+    String? id,
     String? title,
     String? author,
     String? fileName,
@@ -99,7 +100,7 @@ class Book {
     ReadingProgress? progress,
   }) =>
       Book(
-        id: id,
+        id: id ?? this.id,
         title: title ?? this.title,
         author: author ?? this.author,
         fileName: fileName ?? this.fileName,

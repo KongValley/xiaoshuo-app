@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
 /// A page is a range of UTF-16 offsets inside a chapter's body text.
@@ -24,6 +25,19 @@ class Paginator {
   static const double titleMetaGap = 10;
   static const double defaultHeadingGap = 26;
 
+  /// Lower bound for the text examined for a single page. A phone page holds a
+  /// few hundred characters, so this is already a page plus the line that has
+  /// to follow it.
+  static const int _minWindow = 600;
+
+  /// Safety net for unusually tall layouts.
+  static const int _maxWindow = 48000;
+
+  /// Characters laid out by the most recent [paginate] call. Tests use it to
+  /// guard the cost of long chapters without relying on timing.
+  @visibleForTesting
+  static int lastLaidOutChars = 0;
+
   static List<PageSlice> paginate({
     required String text,
     required TextStyle bodyStyle,
@@ -35,7 +49,10 @@ class Paginator {
     TextStyle? metaStyle,
     double headingGap = defaultHeadingGap,
   }) {
-    if (text.isEmpty) return const [];
+    if (text.isEmpty) {
+      lastLaidOutChars = 0;
+      return const [];
+    }
 
     var firstPageHeight = height;
     if (heading != null && heading.isNotEmpty && headingStyle != null) {
@@ -48,6 +65,7 @@ class Paginator {
         locale: _locale,
       )..layout(maxWidth: width);
       var headerHeight = titlePainter.height;
+      titlePainter.dispose();
       if (headingMeta != null &&
           headingMeta.isNotEmpty &&
           metaStyle != null) {
@@ -58,6 +76,7 @@ class Paginator {
           locale: _locale,
         )..layout(maxWidth: width);
         headerHeight += titleMetaGap + metaPainter.height;
+        metaPainter.dispose();
       }
       firstPageHeight = height - headerHeight - headingGap;
     }
@@ -65,12 +84,18 @@ class Paginator {
     final pages = <PageSlice>[];
     var start = 0;
     var first = true;
+    // Examining a fixed 12,000-character window for every page made long
+    // chapters take seconds to lay out. A page only needs to look a little
+    // past its own length, so the window follows the previous page and keeps
+    // doubling whenever the whole window still fits.
+    var windowHint = _minWindow;
+    var laidOut = 0;
 
     while (start < text.length) {
       final available =
           (first ? firstPageHeight : height).clamp(24.0, height).toDouble();
       final remainingLength = text.length - start;
-      var windowLength = math.min(remainingLength, 12000);
+      var windowLength = math.min(remainingLength, windowHint);
       late TextPainter painter;
       late String window;
 
@@ -82,9 +107,10 @@ class Paginator {
           textAlign: TextAlign.left,
           locale: _locale,
         )..layout(maxWidth: width);
+        laidOut += windowLength;
         if (painter.height > available + 0.5 ||
             windowLength >= remainingLength ||
-            windowLength >= 48000) {
+            windowLength >= _maxWindow) {
           break;
         }
         windowLength = math.min(remainingLength, windowLength * 2);
@@ -119,10 +145,15 @@ class Paginator {
           if (end <= start) end = start + _fallbackBreak(window);
         }
       }
+      painter.dispose();
 
       if (end <= start) end = math.min(text.length, start + 1);
       if (end > text.length) end = text.length;
       pages.add(PageSlice(start, end));
+      final pageLength = end - start;
+      if (pageLength > 0) {
+        windowHint = math.max(_minWindow, (pageLength * 1.6).ceil());
+      }
 
       var next = end;
       while (next < text.length) {
@@ -138,6 +169,7 @@ class Paginator {
       first = false;
     }
 
+    lastLaidOutChars = laidOut;
     if (pages.isEmpty) pages.add(PageSlice(0, text.length));
     return pages;
   }

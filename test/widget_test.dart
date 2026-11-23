@@ -56,6 +56,48 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('bookshelf explains a repaired library', (tester) async {
+    final (library, settings, root) = await createRepos(tester);
+    final sourceDir = Directory.systemTemp.createTempSync('modu_source_');
+    addTearDown(() {
+      library.dispose();
+      settings.dispose();
+      if (root.existsSync()) root.deleteSync(recursive: true);
+      if (sourceDir.existsSync()) sourceDir.deleteSync(recursive: true);
+    });
+    configureView(tester);
+
+    final source = File(p.join(sourceDir.path, '测试小说.txt'));
+    source.writeAsStringSync('第一章 起点\n　　这是第一段。\n');
+    await tester.runAsync(() => library.importPaths([source.path]));
+
+    // What an older build left behind when it could not read its index: an
+    // empty shelf, with the book itself still on disk.
+    late LibraryRepository repaired;
+    await tester.runAsync(() async {
+      File(p.join(root.path, 'library.json'))
+          .writeAsStringSync('{"version": 1, "books": []}');
+      final backup = File(p.join(root.path, 'library.json.bak'));
+      if (backup.existsSync()) backup.deleteSync();
+      repaired = LibraryRepository(root: root, parseInIsolate: false);
+      await repaired.init();
+    });
+    addTearDown(repaired.dispose);
+
+    await tester.pumpWidget(ModuApp(library: repaired, settings: settings));
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+
+    // The book is back, and the shelf says where it came from.
+    expect(find.text('测试小说'), findsWidgets);
+    expect(find.text('找回了 1 本未登记的书'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('reader opens a book and turns to the next chapter', (tester) async {
     final (library, settings, root) = await createRepos(tester);
     final sourceDir = Directory.systemTemp.createTempSync('modu_source_');

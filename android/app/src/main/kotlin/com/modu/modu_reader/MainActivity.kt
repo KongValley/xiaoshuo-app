@@ -13,6 +13,10 @@ import java.io.File
  * 墨读 has no third-party plugins. On Android the local TXT picker is provided
  * here with the Storage Access Framework: the user selects documents, they are
  * copied into the app cache, and Dart imports the copies into the library.
+ *
+ * The same channel also reports the app's private files directory. Dart cannot
+ * derive it on its own because the path depends on the user profile the app
+ * runs in (user 0, a work profile, a private space, a clone).
  */
 class MainActivity : FlutterActivity() {
     private var pendingPicker: MethodChannel.Result? = null
@@ -23,6 +27,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "pickTxtFiles" -> openTxtPicker(result)
+                    "getFilesDir" -> result.success(filesDir.absolutePath)
                     else -> result.notImplemented()
                 }
             }

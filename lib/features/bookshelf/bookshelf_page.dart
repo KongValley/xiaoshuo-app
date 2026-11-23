@@ -39,6 +39,18 @@ class _BookshelfPageState extends State<BookshelfPage> {
   void initState() {
     super.initState();
     _listenable = Listenable.merge([widget.library, widget.settings]);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final recovery = widget.library.recovery;
+      if (!recovery.hasRecovery) return;
+      _showSnack(
+        [
+          if (recovery.usedBackupIndex) '书库索引曾损坏，已从备份恢复',
+          if (recovery.recoveredBooks > 0)
+            '找回了 ${recovery.recoveredBooks} 本未登记的书',
+        ].join(' · '),
+      );
+    });
   }
 
   List<Book> _sortedBooks() {

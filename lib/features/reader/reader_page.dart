@@ -218,6 +218,7 @@ class _ReaderPageState extends State<ReaderPage>
   void _turn(int direction) {
     final controller = _controller;
     if (controller == null || _sheetOpen || !controller.hasLayout) return;
+    controller.prewarmWhenIdle();
     final before = controller.snapshot();
     final changed = controller.turnPage(direction);
     if (!changed) {
@@ -247,6 +248,7 @@ class _ReaderPageState extends State<ReaderPage>
   void _runJump(VoidCallback action) {
     final controller = _controller;
     if (controller == null) return;
+    controller.prewarmWhenIdle();
     final before = controller.snapshot();
     action();
     final after = controller.snapshot();

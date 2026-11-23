@@ -35,7 +35,7 @@ class TxtParser {
   TxtParser._();
 
   static const int _maxHeadingLength = 60;
-  static const int _maxChapterChars = 60000;
+  static const int _maxChapterChars = 20000;
 
   static ParsedNovel parse(Uint8List bytes, {required String fileName}) {
     final decoded = decodeNovelBytes(bytes);

@@ -57,18 +57,22 @@ flutter test
 | Windows | `%LOCALAPPDATA%\ModuReader` |
 | macOS | `~/Library/Application Support/ModuReader` |
 | Linux | `$XDG_DATA_HOME/modu-reader` 或 `~/.local/share/modu-reader` |
-| Android | 应用私有 files 目录（`/data/user/0/com.modu.modu_reader/files`） |
+| Android | 应用私有 files 目录（由系统提供；主用户为 `/data/user/0/com.modu.modu_reader/files`，工作资料、隐私空间等按实际用户区分） |
 
 可用环境变量 `MODU_DATA_DIR` 覆盖（测试与调试用）。目录内容：
 
 ```
 ModuReader/
   library.json          # 书架元数据与阅读进度
+  library.json.bak      # 上一次成功写入的索引副本
   settings.json         # 阅读主题 / 字号 / 行距 / 字体 / 排序
   books/<id>/
     content.txt         # 规范化后的 UTF-8 正文（段落一行、两字缩进）
     chapters.json       # 章节标题与字符偏移
+    book.json           # 这本书自己的元数据与进度
 ```
+
+索引先写临时文件再替换，不会因中断而只写一半。启动时如果索引读不出来，会依次退回备份副本、再扫描 `books/` 找回未登记的书，并在书架上说明恢复情况。
 
 ## 项目结构
 
@@ -96,5 +100,5 @@ assets/fonts/           OFL 授权的阅读字体子集与许可说明
 ## 已知限制
 
 - 暂无书签、笔记、TTS、EPUB 等扩展功能。
-- 超长单章（> 6 万字）会自动拆成「（续 N）」章节，避免一次排版过大。
+- 超长单章（> 2 万字）会自动拆成「（续 N）」章节，避免一次排版过大。
 - Android release 构建目前使用 debug 签名，适合本地安装；上架前请配置正式签名。

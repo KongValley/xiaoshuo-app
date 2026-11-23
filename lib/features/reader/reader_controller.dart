@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -94,13 +95,19 @@ class ReaderController extends ChangeNotifier {
   String? _layoutKey;
   final Map<int, List<PageSlice>> _pageCache = {};
   bool _hasLaidOut = false;
+  bool _disposed = false;
   late final int _initialOffset;
+  Timer? _prewarmTimer;
 
   int get chapterIndex => _chapterIndex;
   int get pageIndex => _pageIndex;
   List<PageSlice> get pages => _pages;
   Size get layoutSize => _layout;
   bool get hasLayout => _hasLaidOut && _pages.isNotEmpty;
+
+  /// Chapters whose pages are already laid out.
+  @visibleForTesting
+  Set<int> get cachedChapters => Set<int>.unmodifiable(_pageCache.keys);
 
   Chapter get chapter => chapters[_chapterIndex];
 
@@ -198,6 +205,44 @@ class ReaderController extends ChangeNotifier {
       _pageIndex = _pageIndexForAnchor(anchor);
     }
     notifyListeners();
+    if (_hasLaidOut) prewarmWhenIdle();
+  }
+
+  /// Lays out the chapters next to the current one once the reader has been
+  /// idle for a moment, so crossing a chapter boundary reuses cached pages
+  /// instead of laying out a whole chapter in the middle of a page turn.
+  ///
+  /// Every call restarts the delay; the reader page calls it on each turn so
+  /// the work never lands on top of a page-turn animation.
+  void prewarmWhenIdle() {
+    _prewarmTimer?.cancel();
+    if (_disposed || !_hasLaidOut) return;
+    _prewarmTimer = Timer(const Duration(milliseconds: 420), _prewarmStep);
+  }
+
+  void _prewarmStep() {
+    _prewarmTimer = null;
+    if (_disposed || !_hasLaidOut) return;
+    final next = _chapterIndex + 1;
+    final previous = _chapterIndex - 1;
+    final int? target;
+    if (next < chapters.length && !_pageCache.containsKey(next)) {
+      target = next;
+    } else if (previous >= 0 && !_pageCache.containsKey(previous)) {
+      target = previous;
+    } else {
+      return;
+    }
+    _pagesForChapter(target);
+    // Let a frame through before touching the chapter on the other side.
+    _prewarmTimer = Timer(const Duration(milliseconds: 40), _prewarmStep);
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _prewarmTimer?.cancel();
+    super.dispose();
   }
 
   /// Returns false when the book is already at the first/last page.
@@ -318,6 +363,7 @@ class ReaderController extends ChangeNotifier {
   void _emitProgress() {
     if (_pages.isEmpty) return;
     onProgress(currentPosition());
+    prewarmWhenIdle();
   }
 
   String _keyFor(Size size) =>
