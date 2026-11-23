@@ -1,10 +1,10 @@
 # 墨读 · MoDu Reader
 
-一个用 Flutter 编写的本地 TXT 小说阅读器。无需联网、无需账号：把小说导入书库，自动分章，安静地读。桌面端（Windows）为完整目标平台，Android 工程已生成但导入还需接入系统文件选择器（见文末）。
+一个用 Flutter 编写的本地 TXT 小说阅读器。无需联网、无需账号：把小说导入书库，自动分章，安静地读。Windows 桌面与 Android 均可运行；Android 使用系统文件选择器（SAF）导入。
 
 ## 功能
 
-- **本地导入**：内置文件浏览器，支持多选、直接输入路径、快捷访问与磁盘切换；文件会复制进应用自己的书库，原文件移动/删除不影响阅读。
+- **本地导入**：桌面端内置文件浏览器（多选、路径输入、快捷访问、磁盘切换）；Android 端调用系统文件选择器（Storage Access Framework）。文件会复制进应用自己的书库，原文件移动/删除不影响阅读。
 - **编码自动识别**：UTF-8（含 BOM / 轻微损坏）、UTF-16 LE/BE、GBK/GB2312；不会把 GBK 误判成 UTF-8。
 - **自动分章**：支持 `第12章` / `第十二回` / `001 标题` / `Chapter 12` / `序章` `楔子` `番外` 等格式；无章节的书会按段落自动分节。文件名里的站点前缀、作者信息会自动清理。
 - **书架**：最近阅读/导入时间/书名排序，阅读进度、章节位置、书籍信息与删除。
@@ -27,6 +27,19 @@ flutter build windows --release
 # 产物：build\windows\x64\runner\Release\modu_reader.exe
 ```
 
+构建 Android APK（需要 JDK 17+，通过 `JAVA_HOME` 指定）：
+
+```bash
+flutter build apk --release
+# 通用包，约 56 MB
+flutter build apk --release --split-per-abi
+# 按 ABI 拆分，约 21–25 MB/个
+
+# 产物目录：build/app/outputs/flutter-apk/
+```
+
+Flutter 模板默认用 debug keystore 签名 release 构建，适合本地安装；如需上架应用商店，请在 `android/app/build.gradle.kts` 配置自己的 release 签名。
+
 测试：
 
 ```bash
@@ -44,6 +57,7 @@ flutter test
 | Windows | `%LOCALAPPDATA%\ModuReader` |
 | macOS | `~/Library/Application Support/ModuReader` |
 | Linux | `$XDG_DATA_HOME/modu-reader` 或 `~/.local/share/modu-reader` |
+| Android | 应用私有 files 目录（`/data/user/0/com.modu.modu_reader/files`） |
 
 可用环境变量 `MODU_DATA_DIR` 覆盖（测试与调试用）。目录内容：
 
@@ -68,8 +82,9 @@ lib/
     settings_repository 设置持久化
   features/
     bookshelf/          书架、书卡、书籍信息
-    import/             内置文件浏览器
+    import/             桌面端内置文件浏览器
     reader/             分页器、阅读控制器、阅读页、目录/设置面板
+  data/native_import.dart  Android 系统文件选择器桥接
 tool/                   分章报告与书库播种脚本
 assets/fonts/           OFL 授权的阅读字体子集与许可说明
 ```
@@ -80,6 +95,6 @@ assets/fonts/           OFL 授权的阅读字体子集与许可说明
 
 ## 已知限制
 
-- 当前主要面向 Windows 桌面。Android 工程可以编译，但内置文件浏览器直接读取共享存储在 Android 11+ 会受分区存储限制；如需 Android 完整导入，建议接入 `ACTION_OPEN_DOCUMENT`（SAF）或 `file_picker` 类插件。
 - 暂无书签、笔记、TTS、EPUB 等扩展功能。
 - 超长单章（> 6 万字）会自动拆成「（续 N）」章节，避免一次排版过大。
+- Android release 构建目前使用 debug 签名，适合本地安装；上架前请配置正式签名。

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../data/library_repository.dart';
 import '../../data/models/book.dart';
+import '../../data/native_import.dart';
 import '../../data/settings_repository.dart';
 import '../import/file_browser_page.dart';
 import '../reader/reader_page.dart';
@@ -57,6 +59,17 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Future<void> _openImportBrowser() async {
     if (_importing) return;
+    if (Platform.isAndroid) {
+      try {
+        final paths = await NativeImport.pickTxtFiles();
+        if (!mounted || paths.isEmpty) return;
+        await _importFiles(paths);
+      } catch (error) {
+        if (!mounted) return;
+        _showSnack('无法打开系统文件选择器：$error');
+      }
+      return;
+    }
     final paths = await Navigator.of(context).push<List<String>>(
       PageRouteBuilder<List<String>>(
         transitionDuration: const Duration(milliseconds: 260),
