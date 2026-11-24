@@ -3,11 +3,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modu_reader/app.dart';
-import 'package:modu_reader/core/theme.dart';
-import 'package:modu_reader/data/library_repository.dart';
-import 'package:modu_reader/data/settings_repository.dart';
-import 'package:modu_reader/features/reader/reader_page.dart';
+import 'package:shijuan_reader/app.dart';
+import 'package:shijuan_reader/core/theme.dart';
+import 'package:shijuan_reader/data/library_repository.dart';
+import 'package:shijuan_reader/data/settings_repository.dart';
+import 'package:shijuan_reader/features/reader/reader_page.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
@@ -43,7 +43,7 @@ void main() {
     });
     configureView(tester);
 
-    await tester.pumpWidget(ModuApp(library: library, settings: settings));
+    await tester.pumpWidget(ShijuanApp(library: library, settings: settings));
     for (var i = 0; i < 6; i++) {
       await tester.pump(const Duration(milliseconds: 60));
     }
@@ -84,7 +84,7 @@ void main() {
     });
     addTearDown(repaired.dispose);
 
-    await tester.pumpWidget(ModuApp(library: repaired, settings: settings));
+    await tester.pumpWidget(ShijuanApp(library: repaired, settings: settings));
     for (var i = 0; i < 6; i++) {
       await tester.pump(const Duration(milliseconds: 60));
     }

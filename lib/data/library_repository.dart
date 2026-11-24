@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import '../core/formatters.dart';
 import '../data/models/book.dart';
 import '../data/models/chapter.dart';
+import '../data/models/reading_stats.dart';
 import 'txt/parser.dart';
 
 class BookText {
@@ -168,6 +169,9 @@ class LibraryRepository extends ChangeNotifier {
 
   File _sidecarFile(String id) => File(p.join(_booksDir.path, id, 'book.json'));
 
+  File _bookmarksFile(String id) =>
+      File(p.join(_booksDir.path, id, 'bookmarks.json'));
+
   Future<bool> _hasBookFiles(String id) async =>
       await _contentFile(id).exists() && await _chaptersFile(id).exists();
 
@@ -175,6 +179,37 @@ class LibraryRepository extends ChangeNotifier {
     final content = await _contentFile(book.id).readAsString(encoding: utf8);
     final index = await _readChapterIndex(_chaptersFile(book.id));
     return BookText(content: content, chapters: index?.chapters ?? const []);
+  }
+
+  Future<List<BookBookmark>> loadBookmarks(String bookId) async {
+    try {
+      final file = _bookmarksFile(bookId);
+      if (!await file.exists()) return const [];
+      final raw = await file.readAsString(encoding: utf8);
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return [
+        for (final item in decoded)
+          if (item is Map) BookBookmark.fromJson(item.cast<String, dynamic>()),
+      ]..sort((a, b) => a.charOffset.compareTo(b.charOffset));
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> saveBookmarks(String bookId, List<BookBookmark> bookmarks) async {
+    try {
+      final file = _bookmarksFile(bookId);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(
+        const JsonEncoder.withIndent('  ')
+            .convert([for (final item in bookmarks) item.toJson()]),
+        encoding: utf8,
+        flush: true,
+      );
+    } catch (_) {
+      // Non-fatal if bookmark write fails.
+    }
   }
 
   /// Imports the given TXT paths. Parsing happens in a background isolate so
@@ -306,6 +341,20 @@ class LibraryRepository extends ChangeNotifier {
     _dirtyBooks.add(bookId);
     notifyListeners();
     _schedulePersist();
+  }
+
+  Future<void> resetProgress(String bookId) async {
+    final index = _books.indexWhere((item) => item.id == bookId);
+    if (index < 0) return;
+    final book = _books[index];
+    final firstTitle = book.lastChapterTitle;
+    _books[index] = book.copyWith(
+      progress: const ReadingProgress(),
+      lastChapterTitle: firstTitle,
+    );
+    _dirtyBooks.add(bookId);
+    notifyListeners();
+    await _persistNow();
   }
 
   Future<void> deleteBook(Book book) async {

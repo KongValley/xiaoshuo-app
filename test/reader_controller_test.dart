@@ -1,9 +1,9 @@
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modu_reader/data/models/book.dart';
-import 'package:modu_reader/data/models/chapter.dart';
-import 'package:modu_reader/data/models/reader_settings.dart';
-import 'package:modu_reader/features/reader/reader_controller.dart';
+import 'package:shijuan_reader/data/models/book.dart';
+import 'package:shijuan_reader/data/models/chapter.dart';
+import 'package:shijuan_reader/data/models/reader_settings.dart';
+import 'package:shijuan_reader/features/reader/reader_controller.dart';
 
 const _paragraph = '夜色渐深，风从窗缝里钻进来，书页轻轻翻动，远处传来几声犬吠。\n';
 const _size = Size(312, 528);

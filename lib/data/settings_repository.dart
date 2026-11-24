@@ -2,39 +2,84 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../data/models/book.dart';
 import '../data/models/reader_settings.dart';
 
+enum AppThemePreference {
+  system('跟随系统', ThemeMode.system),
+  light('昼间宣纸', ThemeMode.light),
+  dark('夜间松烟', ThemeMode.dark);
+
+  const AppThemePreference(this.label, this.themeMode);
+
+  final String label;
+  final ThemeMode themeMode;
+
+  AppThemePreference next() =>
+      AppThemePreference.values[(index + 1) % AppThemePreference.values.length];
+
+  static AppThemePreference fromName(String? name) =>
+      AppThemePreference.values.firstWhere(
+        (value) => value.name == name,
+        orElse: () => AppThemePreference.system,
+      );
+}
+
+enum ShelfViewMode {
+  grid('封面陈列'),
+  list('雅致书目');
+
+  const ShelfViewMode(this.label);
+  final String label;
+
+  static ShelfViewMode fromName(String? name) =>
+      ShelfViewMode.values.firstWhere(
+        (value) => value.name == name,
+        orElse: () => ShelfViewMode.grid,
+      );
+}
+
 class AppSettings {
   const AppSettings({
     this.reader = const ReaderSettings(),
     this.bookSort = BookSort.recent,
+    this.themePreference = AppThemePreference.system,
+    this.shelfView = ShelfViewMode.grid,
     this.lastImportDir,
   });
 
   final ReaderSettings reader;
   final BookSort bookSort;
+  final AppThemePreference themePreference;
+  final ShelfViewMode shelfView;
   final String? lastImportDir;
 
   AppSettings copyWith({
     ReaderSettings? reader,
     BookSort? bookSort,
+    AppThemePreference? themePreference,
+    ShelfViewMode? shelfView,
     String? lastImportDir,
     bool clearImportDir = false,
   }) =>
       AppSettings(
         reader: reader ?? this.reader,
         bookSort: bookSort ?? this.bookSort,
-        lastImportDir: clearImportDir ? null : (lastImportDir ?? this.lastImportDir),
+        themePreference: themePreference ?? this.themePreference,
+        shelfView: shelfView ?? this.shelfView,
+        lastImportDir:
+            clearImportDir ? null : (lastImportDir ?? this.lastImportDir),
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'version': 1,
         'reader': reader.toJson(),
         'bookSort': bookSort.name,
+        'themePreference': themePreference.name,
+        'shelfView': shelfView.name,
         'lastImportDir': lastImportDir,
       };
 
@@ -43,6 +88,9 @@ class AppSettings {
           (json['reader'] as Map?)?.cast<String, dynamic>(),
         ),
         bookSort: BookSort.fromName(json['bookSort'] as String?),
+        themePreference:
+            AppThemePreference.fromName(json['themePreference'] as String?),
+        shelfView: ShelfViewMode.fromName(json['shelfView'] as String?),
         lastImportDir: json['lastImportDir'] as String?,
       );
 }
@@ -82,6 +130,18 @@ class SettingsRepository extends ChangeNotifier {
 
   void updateSort(BookSort sort) {
     _settings = _settings.copyWith(bookSort: sort);
+    notifyListeners();
+    _scheduleSave();
+  }
+
+  void updateThemePreference(AppThemePreference preference) {
+    _settings = _settings.copyWith(themePreference: preference);
+    notifyListeners();
+    _scheduleSave();
+  }
+
+  void updateShelfView(ShelfViewMode view) {
+    _settings = _settings.copyWith(shelfView: view);
     notifyListeners();
     _scheduleSave();
   }

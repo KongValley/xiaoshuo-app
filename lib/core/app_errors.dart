@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'brand_logo.dart';
 import 'theme.dart';
 
 /// Stands in for a part of the interface that failed to build. In release
@@ -74,7 +75,7 @@ class StartupErrorApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '墨读',
+      title: '拾卷',
       debugShowCheckedModeBanner: false,
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN')],
@@ -111,6 +112,8 @@ class StartupErrorPage extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const ShijuanLogo(size: 48, variant: ShijuanLogoVariant.emblem),
+                const SizedBox(height: 18),
                 Text(
                   '书库无法打开',
                   style: AppTheme.serif(

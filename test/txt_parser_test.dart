@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modu_reader/data/txt/parser.dart';
+import 'package:shijuan_reader/data/txt/parser.dart';
 
 ParsedNovel _parse(String text, {String fileName = '测试小说.txt'}) =>
     TxtParser.parse(

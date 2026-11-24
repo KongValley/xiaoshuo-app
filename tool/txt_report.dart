@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:modu_reader/data/txt/parser.dart';
+import 'package:shijuan_reader/data/txt/parser.dart';
 import 'package:path/path.dart' as p;
 
 /// Developer helper: parse a TXT file and write a UTF-8 report.

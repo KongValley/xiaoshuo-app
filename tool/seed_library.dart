@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:modu_reader/data/txt/parser.dart';
+import 'package:shijuan_reader/data/txt/parser.dart';
 import 'package:path/path.dart' as p;
 
 /// Developer helper: import a TXT file directly into the app's data directory
@@ -10,7 +10,7 @@ import 'package:path/path.dart' as p;
 /// Usage:
 ///   `dart run tool/seed_library.dart <novel.txt> [dataDir]`
 ///
-/// If dataDir is omitted, %LOCALAPPDATA%/ModuReader is used on Windows.
+/// If dataDir is omitted, %LOCALAPPDATA%/ShijuanReader is used on Windows.
 void main(List<String> args) {
   if (args.isEmpty) {
     stderr.writeln('Usage: dart run tool/seed_library.dart <novel.txt> [dataDir]');
@@ -32,7 +32,7 @@ void main(List<String> args) {
             Platform.environment['LOCALAPPDATA'] ??
                 Platform.environment['APPDATA'] ??
                 Directory.current.path,
-            'ModuReader',
+            'ShijuanReader',
           ),
   );
 

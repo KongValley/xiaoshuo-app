@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:enough_convert/enough_convert.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modu_reader/data/txt/encoding.dart';
+import 'package:shijuan_reader/data/txt/encoding.dart';
 
 Uint8List _utf16(String text, {bool littleEndian = true, bool bom = true}) {
   final bytes = <int>[];

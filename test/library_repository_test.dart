@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modu_reader/data/library_repository.dart';
-import 'package:modu_reader/data/models/book.dart';
+import 'package:shijuan_reader/data/library_repository.dart';
+import 'package:shijuan_reader/data/models/book.dart';
 import 'package:path/path.dart' as p;
 
 /// A tiny two-chapter novel.

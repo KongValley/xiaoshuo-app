@@ -67,6 +67,17 @@ class Fmt {
     return '约 ${hours.round()} 小时';
   }
 
+  /// Human-readable accumulated reading duration.
+  static String readingDuration(int seconds) {
+    if (seconds < 60) return seconds <= 0 ? '0 分钟' : '不到 1 分钟';
+    final totalMinutes = seconds ~/ 60;
+    if (totalMinutes < 60) return '$totalMinutes 分钟';
+    final hours = totalMinutes ~/ 60;
+    final mins = totalMinutes % 60;
+    if (mins == 0) return '$hours 小时';
+    return '$hours 小时 $mins 分';
+  }
+
   static String _two(int value) => value.toString().padLeft(2, '0');
 
   static String fileName(String path) {

@@ -54,6 +54,29 @@ class ReaderPageSnapshot {
       other.pageIndex == pageIndex;
 }
 
+/// Paired left/right folio snapshot supporting single-page & two-page spread reading.
+class ReaderSpreadSnapshot {
+  const ReaderSpreadSnapshot({
+    required this.left,
+    this.right,
+    required this.chapterIndex,
+    required this.hasNextChapter,
+  });
+
+  final ReaderPageSnapshot left;
+  final ReaderPageSnapshot? right;
+  final int chapterIndex;
+  final bool hasNextChapter;
+
+  int get totalBodyChars => left.body.length + (right?.body.length ?? 0);
+  int get pageCount => right == null ? 1 : 2;
+
+  bool sameSpread(ReaderSpreadSnapshot? other) =>
+      other != null &&
+      left.samePage(other.left) &&
+      (right?.samePage(other.right) ?? other.right == null);
+}
+
 class ReaderController extends ChangeNotifier {
   ReaderController({
     required this.book,
@@ -133,42 +156,213 @@ class ReaderController extends ChangeNotifier {
     return _pages[_pageIndex].start;
   }
 
-  double get percent {
+  double get percent => percentFor(spread: false);
+
+  double percentFor({required bool spread}) {
     if (content.isEmpty) return 0;
-    if (_chapterIndex == chapters.length - 1 &&
-        _pages.isNotEmpty &&
-        _pageIndex == _pages.length - 1) {
-      return 1;
-    }
-    return (absoluteOffset / content.length).clamp(0.0, 1.0);
+    if (isLastPageOfBookFor(spread: spread)) return 1;
+    final idx = spread ? (_pageIndex & ~1) : _pageIndex;
+    final offset = _pages.isEmpty ? _initialOffset : chapter.start + _pages[idx].start;
+    return (offset / content.length).clamp(0.0, 1.0);
   }
 
   int get remainingChars =>
       math.max(0, content.length - absoluteOffset);
 
-  String get pageIndicator =>
-      '${_pageIndex + 1} / ${_pages.isEmpty ? 1 : _pages.length}';
+  String get pageIndicator => pageIndicatorFor(spread: false);
 
-  bool get isFirstPageOfBook => _chapterIndex == 0 && _pageIndex == 0;
+  String pageIndicatorFor({required bool spread}) {
+    if (_pages.isEmpty) return '1 / 1';
+    if (!spread) return '${_pageIndex + 1} / ${_pages.length}';
+    final leftIdx = _pageIndex & ~1;
+    if (leftIdx + 1 < _pages.length) {
+      return '${leftIdx + 1}-${leftIdx + 2} / ${_pages.length}';
+    }
+    return '${leftIdx + 1} / ${_pages.length}';
+  }
 
-  bool get isLastPageOfBook =>
+  bool get isFirstPageOfBook => isFirstPageOfBookFor(spread: false);
+
+  bool get isLastPageOfBook => isLastPageOfBookFor(spread: false);
+
+  bool isFirstPageOfBookFor({required bool spread}) =>
+      _chapterIndex == 0 && (spread ? (_pageIndex & ~1) == 0 : _pageIndex == 0);
+
+  bool isLastPageOfBookFor({required bool spread}) =>
       _chapterIndex == chapters.length - 1 &&
       _pages.isNotEmpty &&
-      _pageIndex == _pages.length - 1;
+      (spread ? ((_pageIndex & ~1) + 2 >= _pages.length) : _pageIndex == _pages.length - 1);
 
-  ReaderPageSnapshot? snapshot() {
+  ReaderPageSnapshot? snapshot() => _snapshotAt(_chapterIndex, _pageIndex);
+
+  ReaderSpreadSnapshot? spreadSnapshot({required bool spread}) {
     if (_pages.isEmpty) return null;
-    final page = _pages[_pageIndex];
-    final start = chapter.start + page.start;
-    final end = chapter.start + page.end;
+    final leftIdx = spread ? (_pageIndex & ~1) : _pageIndex;
+    final left = _snapshotAt(_chapterIndex, leftIdx, pages: _pages);
+    if (left == null) return null;
+    final right = spread && leftIdx + 1 < _pages.length
+        ? _snapshotAt(_chapterIndex, leftIdx + 1, pages: _pages)
+        : null;
+    return ReaderSpreadSnapshot(
+      left: left,
+      right: right,
+      chapterIndex: _chapterIndex,
+      hasNextChapter: _chapterIndex < chapters.length - 1,
+    );
+  }
+
+  /// Absolute char range covered by the currently visible page or two-page spread.
+  ({int start, int end, int chapterIndex, String chapterTitle, String excerptSource})?
+      visibleRangeFor({required bool spread}) {
+    if (_pages.isEmpty) return null;
+    final leftIdx = spread ? (_pageIndex & ~1) : _pageIndex;
+    if (leftIdx < 0 || leftIdx >= _pages.length) return null;
+    final rightIdx =
+        spread && leftIdx + 1 < _pages.length ? leftIdx + 1 : leftIdx;
+    final chStart = chapter.start;
+    final start = chStart + _pages[leftIdx].start;
+    final end = chStart + _pages[rightIdx].end;
+    final snap = _snapshotAt(_chapterIndex, leftIdx, pages: _pages);
+    if (snap == null) return null;
+    return (
+      start: start,
+      end: end,
+      chapterIndex: _chapterIndex,
+      chapterTitle: snap.chapterTitle,
+      excerptSource: snap.body,
+    );
+  }
+
+  /// Previews the adjacent spread in [direction] without mutating state.
+  ReaderSpreadSnapshot? peekSpread(int direction, {required bool spread}) {
+    if (_pages.isEmpty) return null;
+    if (!spread) {
+      final page = peekPage(direction);
+      if (page == null) return null;
+      return ReaderSpreadSnapshot(
+        left: page,
+        chapterIndex: page.chapterIndex,
+        hasNextChapter: page.chapterIndex < chapters.length - 1,
+      );
+    }
+
+    final leftIdx = _pageIndex & ~1;
+    if (direction > 0) {
+      if (leftIdx + 2 < _pages.length) {
+        final nextLeft = _snapshotAt(_chapterIndex, leftIdx + 2, pages: _pages);
+        if (nextLeft == null) return null;
+        final nextRight = leftIdx + 3 < _pages.length
+            ? _snapshotAt(_chapterIndex, leftIdx + 3, pages: _pages)
+            : null;
+        return ReaderSpreadSnapshot(
+          left: nextLeft,
+          right: nextRight,
+          chapterIndex: _chapterIndex,
+          hasNextChapter: _chapterIndex < chapters.length - 1,
+        );
+      }
+      if (_chapterIndex < chapters.length - 1) {
+        final nextChapter = _chapterIndex + 1;
+        final nextPages = _pagesForChapter(nextChapter);
+        if (nextPages.isEmpty) return null;
+        final nextLeft = _snapshotAt(nextChapter, 0, pages: nextPages);
+        if (nextLeft == null) return null;
+        final nextRight = nextPages.length > 1
+            ? _snapshotAt(nextChapter, 1, pages: nextPages)
+            : null;
+        return ReaderSpreadSnapshot(
+          left: nextLeft,
+          right: nextRight,
+          chapterIndex: nextChapter,
+          hasNextChapter: nextChapter < chapters.length - 1,
+        );
+      }
+      return null;
+    } else {
+      if (leftIdx >= 2) {
+        final prevLeft = _snapshotAt(_chapterIndex, leftIdx - 2, pages: _pages);
+        if (prevLeft == null) return null;
+        final prevRight =
+            _snapshotAt(_chapterIndex, leftIdx - 1, pages: _pages);
+        return ReaderSpreadSnapshot(
+          left: prevLeft,
+          right: prevRight,
+          chapterIndex: _chapterIndex,
+          hasNextChapter: _chapterIndex < chapters.length - 1,
+        );
+      }
+      if (_chapterIndex > 0) {
+        final prevChapter = _chapterIndex - 1;
+        final prevPages = _pagesForChapter(prevChapter);
+        if (prevPages.isEmpty) return null;
+        final lastLeft = (prevPages.length - 1) & ~1;
+        final prevLeft =
+            _snapshotAt(prevChapter, lastLeft, pages: prevPages);
+        if (prevLeft == null) return null;
+        final prevRight = lastLeft + 1 < prevPages.length
+            ? _snapshotAt(prevChapter, lastLeft + 1, pages: prevPages)
+            : null;
+        return ReaderSpreadSnapshot(
+          left: prevLeft,
+          right: prevRight,
+          chapterIndex: prevChapter,
+          hasNextChapter: prevChapter < chapters.length - 1,
+        );
+      }
+      return null;
+    }
+  }
+
+  /// Returns a non-mutating snapshot of the adjacent page in [direction]
+  /// (`-1` for previous, `+1` for next), or `null` at book boundaries.
+  ReaderPageSnapshot? peekPage(int direction) {
+    if (_pages.isEmpty) return null;
+    if (direction > 0) {
+      if (_pageIndex < _pages.length - 1) {
+        return _snapshotAt(_chapterIndex, _pageIndex + 1, pages: _pages);
+      }
+      if (_chapterIndex < chapters.length - 1) {
+        final nextChapter = _chapterIndex + 1;
+        final nextPages = _pagesForChapter(nextChapter);
+        if (nextPages.isEmpty) return null;
+        return _snapshotAt(nextChapter, 0, pages: nextPages);
+      }
+      return null;
+    } else {
+      if (_pageIndex > 0) {
+        return _snapshotAt(_chapterIndex, _pageIndex - 1, pages: _pages);
+      }
+      if (_chapterIndex > 0) {
+        final prevChapter = _chapterIndex - 1;
+        final prevPages = _pagesForChapter(prevChapter);
+        if (prevPages.isEmpty) return null;
+        return _snapshotAt(prevChapter, prevPages.length - 1, pages: prevPages);
+      }
+      return null;
+    }
+  }
+
+  ReaderPageSnapshot? _snapshotAt(
+    int chapterIdx,
+    int pageIdx, {
+    List<PageSlice>? pages,
+  }) {
+    final targetPages = pages ?? _pages;
+    if (targetPages.isEmpty || pageIdx < 0 || pageIdx >= targetPages.length) {
+      return null;
+    }
+    final targetChapter = chapters[chapterIdx];
+    final page = targetPages[pageIdx];
+    final start = targetChapter.start + page.start;
+    final end = targetChapter.start + page.end;
     if (start < 0 || end > content.length || start >= end) return null;
     return ReaderPageSnapshot(
-      chapterIndex: _chapterIndex,
-      pageIndex: _pageIndex,
-      chapterTitle: chapterHeaderTitle,
-      meta: chapterMeta,
+      chapterIndex: chapterIdx,
+      pageIndex: pageIdx,
+      chapterTitle: _headerTitleFor(chapterIdx),
+      meta: _metaFor(chapterIdx),
       body: content.substring(start, end),
-      isFirstPage: _pageIndex == 0,
+      isFirstPage: pageIdx == 0,
     );
   }
 
@@ -190,15 +384,19 @@ class ReaderController extends ChangeNotifier {
   }
 
   void applySettings(ReaderSettings settings) {
-    if (settings.fontSize == _settings.fontSize &&
-        settings.lineHeight == _settings.lineHeight &&
-        settings.font == _settings.font &&
-        settings.theme == _settings.theme) {
+    final layoutChanged = settings.fontSize != _settings.fontSize ||
+        settings.lineHeight != _settings.lineHeight ||
+        settings.font != _settings.font;
+    if (!layoutChanged &&
+        settings.theme == _settings.theme &&
+        settings.pageTurn == _settings.pageTurn &&
+        settings.margin == _settings.margin &&
+        settings.pageLayout == _settings.pageLayout) {
       return;
     }
     final anchor = _hasLaidOut ? absoluteOffset : _initialOffset;
     _settings = settings;
-    if (_hasLaidOut && _layout.width >= 48) {
+    if (layoutChanged && _hasLaidOut && _layout.width >= 48) {
       _layoutKey = _keyFor(_layout);
       _cacheClear();
       _pages = _pagesForChapter(_chapterIndex);
@@ -245,12 +443,15 @@ class ReaderController extends ChangeNotifier {
     super.dispose();
   }
 
-  /// Returns false when the book is already at the first/last page.
-  bool turnPage(int direction) {
+  /// Returns false when the book is already at the first/last page or spread.
+  bool turnPage(int direction, {bool spread = false}) {
     if (_pages.isEmpty) return false;
+    final step = spread ? 2 : 1;
+    final baseIdx = spread ? (_pageIndex & ~1) : _pageIndex;
+
     if (direction > 0) {
-      if (_pageIndex < _pages.length - 1) {
-        _pageIndex++;
+      if (baseIdx + step < _pages.length) {
+        _pageIndex = baseIdx + step;
       } else if (_chapterIndex < chapters.length - 1) {
         _chapterIndex++;
         _pages = _pagesForChapter(_chapterIndex);
@@ -259,12 +460,14 @@ class ReaderController extends ChangeNotifier {
         return false;
       }
     } else {
-      if (_pageIndex > 0) {
-        _pageIndex--;
+      if (baseIdx >= step) {
+        _pageIndex = baseIdx - step;
       } else if (_chapterIndex > 0) {
         _chapterIndex--;
         _pages = _pagesForChapter(_chapterIndex);
-        _pageIndex = math.max(0, _pages.length - 1);
+        _pageIndex = _pages.isEmpty
+            ? 0
+            : (spread ? ((_pages.length - 1) & ~1) : _pages.length - 1);
       } else {
         return false;
       }

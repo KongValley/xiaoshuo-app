@@ -2,13 +2,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modu_reader/core/app_dirs.dart';
-import 'package:modu_reader/core/app_errors.dart';
+import 'package:shijuan_reader/core/app_dirs.dart';
+import 'package:shijuan_reader/core/app_errors.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
   test('uses the first directory it is allowed to create', () async {
-    final root = Directory.systemTemp.createTempSync('modu_dirs_');
+    final root = Directory.systemTemp.createTempSync('shijuan_dirs_');
     addTearDown(() => root.deleteSync(recursive: true));
 
     // A file cannot be used as a parent folder, so this candidate always
@@ -24,7 +24,7 @@ void main() {
 
   test('falls back to the temporary folder when nothing can be created', () async {
     final dir = await AppDirs.firstWritable(const []);
-    expect(dir.path, p.join(Directory.systemTemp.path, 'ModuReader'));
+    expect(dir.path, p.join(Directory.systemTemp.path, 'ShijuanReader'));
     if (dir.existsSync()) dir.deleteSync(recursive: true);
   });
 

@@ -1,4 +1,4 @@
-package com.modu.modu_reader
+package com.shijuan.shijuan_reader
 
 import android.app.Activity
 import android.content.Intent
@@ -10,7 +10,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 /**
- * 墨读 has no third-party plugins. On Android the local TXT picker is provided
+ * 拾卷 has no third-party plugins. On Android the local TXT picker is provided
  * here with the Storage Access Framework: the user selects documents, they are
  * copied into the app cache, and Dart imports the copies into the library.
  *
@@ -135,7 +135,7 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
-        private const val CHANNEL = "modu/native"
-        private const val REQUEST_PICK_TXT = 0x4D4F
+        private const val CHANNEL = "shijuan/native"
+        private const val REQUEST_PICK_TXT = 0x534A
     }
 }

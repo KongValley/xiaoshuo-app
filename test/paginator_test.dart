@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modu_reader/features/reader/paginator.dart';
+import 'package:shijuan_reader/features/reader/paginator.dart';
 
 void main() {
   testWidgets('paginates a long chapter into ordered pages', (tester) async {

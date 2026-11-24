@@ -4,14 +4,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/brand_logo.dart';
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
 
+enum _FileSort {
+  name('名称'),
+  size('大小'),
+  modified('时间');
+
+  const _FileSort(this.label);
+  final String label;
+}
+
 /// A self-contained local file browser used for importing TXT novels.
 ///
-/// The app intentionally has no native file-picker plugin, so it ships this
-/// small browser. It supports multiple selection across folders, direct path
-/// entry, quick-access locations and double-click import.
+/// Supports interactive breadcrumbs, direct path entry, directory filtering,
+/// sorting, multi-select / select-all, and double-click import.
 class FileBrowserPage extends StatefulWidget {
   const FileBrowserPage({super.key, this.initialDirectory});
 
@@ -31,6 +40,8 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
   };
 
   final TextEditingController _pathController = TextEditingController();
+  final TextEditingController _filterController = TextEditingController();
+  final FocusNode _pathFocus = FocusNode();
   final Set<String> _selected = <String>{};
   final List<String> _history = <String>[];
   final List<_QuickLink> _quickLinks = [];
@@ -40,6 +51,9 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
   List<Directory> _folders = const [];
   List<_FileEntry> _files = const [];
   bool _loading = true;
+  bool _editingPath = false;
+  String _filter = '';
+  _FileSort _sort = _FileSort.name;
   String? _error;
   int _loadToken = 0;
 
@@ -54,6 +68,8 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
   @override
   void dispose() {
     _pathController.dispose();
+    _filterController.dispose();
+    _pathFocus.dispose();
     super.dispose();
   }
 
@@ -137,6 +153,7 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _editingPath = false;
     });
 
     try {
@@ -146,7 +163,9 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
       final files = <_FileEntry>[];
       for (final entity in entities) {
         final name = p.basename(entity.path);
-        if (name.isEmpty || name.startsWith('.') || _hiddenFolderNames.contains(name)) {
+        if (name.isEmpty ||
+            name.startsWith('.') ||
+            _hiddenFolderNames.contains(name)) {
           continue;
         }
         if (entity is Directory) {
@@ -169,17 +188,15 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
               p.basename(b.path).toLowerCase(),
             ),
       );
-      files.sort(
-        (a, b) => p.basename(a.file.path).toLowerCase().compareTo(
-              p.basename(b.file.path).toLowerCase(),
-            ),
-      );
+      _sortFiles(files);
       if (!mounted || token != _loadToken) return;
       setState(() {
         _current = dir;
         _folders = folders;
         _files = files;
         _loading = false;
+        _filter = '';
+        _filterController.clear();
         _pathController.text = dir.path;
         _pathController.selection = TextSelection.collapsed(
           offset: _pathController.text.length,
@@ -190,12 +207,49 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
       setState(() {
         _current = dir;
         _loading = false;
-        _error = error is FileSystemException
-            ? '没有权限访问这个文件夹'
-            : '无法读取这个文件夹';
+        _error = error is FileSystemException ? '没有权限访问这个文件夹' : '无法读取这个文件夹';
         _pathController.text = dir.path;
       });
     }
+  }
+
+  void _sortFiles(List<_FileEntry> list) {
+    switch (_sort) {
+      case _FileSort.name:
+        list.sort(
+          (a, b) => p.basename(a.file.path).toLowerCase().compareTo(
+                p.basename(b.file.path).toLowerCase(),
+              ),
+        );
+        break;
+      case _FileSort.size:
+        list.sort((a, b) => b.size.compareTo(a.size));
+        break;
+      case _FileSort.modified:
+        list.sort((a, b) {
+          final ta = a.modified ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final tb = b.modified ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return tb.compareTo(ta);
+        });
+        break;
+    }
+  }
+
+  List<_Breadcrumb> _breadcrumbs() {
+    final current = _current;
+    if (current == null) return const [];
+    final normalized = p.normalize(current.path);
+    final parts = <_Breadcrumb>[];
+    var cursor = Directory(normalized);
+    while (true) {
+      final base = p.basename(cursor.path);
+      final label = base.isEmpty ? cursor.path : base;
+      parts.add(_Breadcrumb(label, cursor.path));
+      final parent = cursor.parent;
+      if (parent.path == cursor.path) break;
+      cursor = parent;
+    }
+    return parts.reversed.toList();
   }
 
   void _goBack() {
@@ -239,9 +293,44 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
     setState(() => _error = '路径不存在：$value');
   }
 
+  void _togglePathEdit() {
+    setState(() {
+      _editingPath = !_editingPath;
+      if (_editingPath && _current != null) {
+        _pathController.text = _current!.path;
+        _pathController.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _pathController.text.length,
+        );
+      }
+    });
+    if (_editingPath) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _pathFocus.requestFocus();
+      });
+    }
+  }
+
   void _toggleSelection(File file) {
     setState(() {
       if (!_selected.add(file.path)) _selected.remove(file.path);
+    });
+  }
+
+  void _toggleSelectAllVisible(List<_FileEntry> visibleFiles) {
+    if (visibleFiles.isEmpty) return;
+    final allSelected =
+        visibleFiles.every((entry) => _selected.contains(entry.file.path));
+    setState(() {
+      if (allSelected) {
+        for (final entry in visibleFiles) {
+          _selected.remove(entry.file.path);
+        }
+      } else {
+        for (final entry in visibleFiles) {
+          _selected.add(entry.file.path);
+        }
+      }
     });
   }
 
@@ -258,12 +347,16 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.escape): () {
-          if (_selected.isNotEmpty) {
+          if (_editingPath) {
+            setState(() => _editingPath = false);
+          } else if (_selected.isNotEmpty) {
             setState(_selected.clear);
           } else {
             Navigator.of(context).maybePop();
           }
         },
+        const SingleActivator(LogicalKeyboardKey.keyL, control: true):
+            _togglePathEdit,
       },
       child: Focus(
         autofocus: true,
@@ -278,7 +371,7 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final wide = constraints.maxWidth >= 900;
+                      final wide = constraints.maxWidth >= 720;
                       final body = _buildFileArea(theme, surface);
                       if (!wide) {
                         return Column(
@@ -288,11 +381,13 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
                           ],
                         );
                       }
+                      final sidebarWidth =
+                          constraints.maxWidth >= 960 ? 224.0 : 196.0;
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           SizedBox(
-                            width: 214,
+                            width: sidebarWidth,
                             child: _buildSidebar(theme, surface),
                           ),
                           VerticalDivider(width: 1, color: surface.hairline),
@@ -313,7 +408,7 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
 
   Widget _buildHeader(ThemeData theme, AppSurface surface) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 16, 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 18, 10),
       child: Row(
         children: [
           IconButton(
@@ -322,42 +417,54 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
             icon: Icon(Icons.close_rounded, color: theme.colorScheme.onSurface),
           ),
           const SizedBox(width: 4),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '导入 TXT',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: theme.colorScheme.onSurface,
-                  letterSpacing: 0.4,
+          const ShijuanLogo(size: 28, variant: ShijuanLogoVariant.emblem),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '导入本地小说',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTheme.serif(
+                    19,
+                    color: theme.colorScheme.onSurface,
+                    letterSpacing: 0.4,
+                    height: 1.2,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '选择本地小说，支持一次导入多个文件',
-                style: TextStyle(fontSize: 11.5, color: surface.muted),
-              ),
-            ],
-          ),
-          const Spacer(),
-          if (_current != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: Text(
-                '仅显示 .txt 文件',
-                style: TextStyle(fontSize: 11, color: surface.muted),
-              ),
+                Text(
+                  '点击勾选支持多选 · 双击单个文件直接导入',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: surface.muted),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: surface.card,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: surface.hairline),
+            ),
+            child: Text(
+              '仅显示 .txt',
+              style: TextStyle(fontSize: 11, color: surface.muted),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildPathBar(ThemeData theme, AppSurface surface) {
+    final crumbs = _breadcrumbs();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Row(
         children: [
           IconButton(
@@ -372,31 +479,126 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
           ),
           const SizedBox(width: 4),
           Expanded(
-            child: TextField(
-              controller: _pathController,
-              style: TextStyle(fontSize: 12.5, color: theme.colorScheme.onSurface),
-              onSubmitted: _goPath,
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: '输入文件夹路径后回车',
-                prefixIcon: Icon(
-                  Icons.folder_open_rounded,
-                  size: 18,
-                  color: surface.muted,
-                ),
-                suffixIcon: IconButton(
-                  tooltip: '跳转',
-                  icon: Icon(
-                    Icons.subdirectory_arrow_left_rounded,
-                    size: 18,
-                    color: theme.colorScheme.primary,
+            child: _editingPath
+                ? TextField(
+                    controller: _pathController,
+                    focusNode: _pathFocus,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                    onSubmitted: _goPath,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: '输入文件夹路径后回车',
+                      prefixIcon: Icon(
+                        Icons.folder_open_rounded,
+                        size: 18,
+                        color: surface.muted,
+                      ),
+                      suffixIcon: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: '跳转',
+                            icon: Icon(
+                              Icons.subdirectory_arrow_left_rounded,
+                              size: 18,
+                              color: theme.colorScheme.primary,
+                            ),
+                            onPressed: () => _goPath(_pathController.text),
+                          ),
+                          IconButton(
+                            tooltip: '返回面包屑',
+                            icon: Icon(
+                              Icons.close_rounded,
+                              size: 17,
+                              color: surface.muted,
+                            ),
+                            onPressed: _togglePathEdit,
+                          ),
+                        ],
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 11,
+                      ),
+                    ),
+                  )
+                : Container(
+                    height: 40,
+                    padding: const EdgeInsets.only(left: 10, right: 4),
+                    decoration: BoxDecoration(
+                      color: surface.card,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: surface.hairline),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.folder_open_rounded,
+                          size: 17,
+                          color: surface.muted,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: crumbs.length,
+                            separatorBuilder: (context, _) => Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 2),
+                              child: Icon(
+                                Icons.chevron_right_rounded,
+                                size: 16,
+                                color: surface.muted.withValues(alpha: 0.6),
+                              ),
+                            ),
+                            itemBuilder: (context, index) {
+                              final crumb = crumbs[index];
+                              final isLast = index == crumbs.length - 1;
+                              return Center(
+                                child: InkWell(
+                                  onTap: isLast
+                                      ? null
+                                      : () => _load(Directory(crumb.path)),
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 4,
+                                    ),
+                                    child: Text(
+                                      crumb.label,
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: isLast
+                                            ? FontWeight.w600
+                                            : FontWeight.w400,
+                                        color: isLast
+                                            ? theme.colorScheme.primary
+                                            : theme.colorScheme.onSurface
+                                                .withValues(alpha: 0.8),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '手动输入路径 (Ctrl+L)',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: _togglePathEdit,
+                          icon: Icon(
+                            Icons.edit_outlined,
+                            size: 16,
+                            color: surface.muted,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  onPressed: () => _goPath(_pathController.text),
-                ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-              ),
-            ),
           ),
           const SizedBox(width: 4),
           IconButton(
@@ -493,7 +695,11 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: ActionChip(
-                  avatar: Icon(Icons.storage_rounded, size: 15, color: surface.muted),
+                  avatar: Icon(
+                    Icons.storage_rounded,
+                    size: 15,
+                    color: surface.muted,
+                  ),
                   label: Text(drive),
                   labelStyle: TextStyle(
                     fontSize: 11.5,
@@ -570,33 +776,178 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
       );
     }
 
-    final total = _folders.length + _files.length;
-    return Scrollbar(
-      child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(12, 8, 16, 20),
-        itemCount: total,
-        itemBuilder: (context, index) {
-          if (index < _folders.length) {
-            final folder = _folders[index];
-            return _FolderTile(
-              folder: folder,
-              theme: theme,
-              surface: surface,
-              onTap: () => _load(folder),
-            );
-          }
-          final entry = _files[index - _folders.length];
-          final selected = _selected.contains(entry.file.path);
-          return _FileTile(
-            entry: entry,
-            selected: selected,
-            theme: theme,
-            surface: surface,
-            onTap: () => _toggleSelection(entry.file),
-            onDoubleTap: () => _finish([entry.file.path]),
-          );
-        },
-      ),
+    final query = _filter.trim().toLowerCase();
+    final visibleFolders = query.isEmpty
+        ? _folders
+        : [
+            for (final folder in _folders)
+              if (p.basename(folder.path).toLowerCase().contains(query)) folder,
+          ];
+    final visibleFiles = query.isEmpty
+        ? _files
+        : [
+            for (final entry in _files)
+              if (p.basename(entry.file.path).toLowerCase().contains(query))
+                entry,
+          ];
+    final allFilesSelected = visibleFiles.isNotEmpty &&
+        visibleFiles.every((entry) => _selected.contains(entry.file.path));
+
+    final total = visibleFolders.length + visibleFiles.length;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 34,
+                  child: TextField(
+                    controller: _filterController,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                    onChanged: (value) => setState(() => _filter = value),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: '筛选当前目录…',
+                      prefixIcon: Icon(
+                        Icons.filter_list_rounded,
+                        size: 16,
+                        color: surface.muted,
+                      ),
+                      suffixIcon: _filter.isNotEmpty
+                          ? IconButton(
+                              padding: EdgeInsets.zero,
+                              icon: Icon(
+                                Icons.close_rounded,
+                                size: 15,
+                                color: surface.muted,
+                              ),
+                              onPressed: () {
+                                _filterController.clear();
+                                setState(() => _filter = '');
+                              },
+                            )
+                          : null,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+              ),
+              if (visibleFiles.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () => _toggleSelectAllVisible(visibleFiles),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                  ),
+                  child: Text(
+                    allFilesSelected ? '取消全选' : '全选本页 (${visibleFiles.length})',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                PopupMenuButton<_FileSort>(
+                  tooltip: '排序：${_sort.label}',
+                  initialValue: _sort,
+                  color: theme.colorScheme.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  onSelected: (value) {
+                    setState(() {
+                      _sort = value;
+                      final copy = List<_FileEntry>.from(_files);
+                      _sortFiles(copy);
+                      _files = copy;
+                    });
+                  },
+                  itemBuilder: (context) => [
+                    for (final s in _FileSort.values)
+                      PopupMenuItem(
+                        value: s,
+                        child: Row(
+                          children: [
+                            Text(s.label, style: const TextStyle(fontSize: 13)),
+                            const Spacer(),
+                            if (s == _sort)
+                              Icon(
+                                Icons.check_rounded,
+                                size: 16,
+                                color: theme.colorScheme.primary,
+                              ),
+                          ],
+                        ),
+                      ),
+                  ],
+                  child: Container(
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: surface.card,
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(color: surface.hairline),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.sort_rounded, size: 15, color: surface.muted),
+                        const SizedBox(width: 4),
+                        Text(
+                          _sort.label,
+                          style: TextStyle(fontSize: 11.5, color: surface.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        Expanded(
+          child: total == 0
+              ? Center(
+                  child: Text(
+                    '没有匹配「$_filter」的项目',
+                    style: TextStyle(fontSize: 13, color: surface.muted),
+                  ),
+                )
+              : Scrollbar(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 16, 20),
+                    itemCount: total,
+                    itemBuilder: (context, index) {
+                      if (index < visibleFolders.length) {
+                        final folder = visibleFolders[index];
+                        return _FolderTile(
+                          folder: folder,
+                          theme: theme,
+                          surface: surface,
+                          onTap: () => _load(folder),
+                        );
+                      }
+                      final entry =
+                          visibleFiles[index - visibleFolders.length];
+                      final selected = _selected.contains(entry.file.path);
+                      return _FileTile(
+                        entry: entry,
+                        selected: selected,
+                        theme: theme,
+                        surface: surface,
+                        onTap: () => _toggleSelection(entry.file),
+                        onDoubleTap: () => _finish([entry.file.path]),
+                      );
+                    },
+                  ),
+                ),
+        ),
+      ],
     );
   }
 
@@ -620,16 +971,14 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
           Expanded(
             child: Tooltip(
               message: names,
-              waitDuration: const Duration(milliseconds: 700),
+              waitDuration: const Duration(milliseconds: 500),
               child: Text(
-                count > 0 ? '已选择 $count 个文件' : '请选择一个或多个 TXT 文件',
+                count > 0 ? '已选择 $count 个：$names' : '请选择一个或多个 TXT 文件',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 12.5,
-                  color: count > 0
-                      ? theme.colorScheme.onSurface
-                      : surface.muted,
+                  color: count > 0 ? theme.colorScheme.onSurface : surface.muted,
                 ),
               ),
             ),
@@ -649,6 +998,13 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
       ),
     );
   }
+}
+
+class _Breadcrumb {
+  const _Breadcrumb(this.label, this.path);
+
+  final String label;
+  final String path;
 }
 
 class _QuickLink {
@@ -838,7 +1194,7 @@ class _FileTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 1),
         child: Material(
           color: selected
-              ? theme.colorScheme.primary.withValues(alpha: 0.07)
+              ? theme.colorScheme.primary.withValues(alpha: 0.08)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
           child: InkWell(

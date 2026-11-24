@@ -1,4 +1,4 @@
-# 墨读 · MoDu Reader
+# 拾卷 · ShiJuan Reader
 
 一个用 Flutter 编写的本地 TXT 小说阅读器。无需联网、无需账号：把小说导入书库，自动分章，安静地读。Windows 桌面与 Android 均可运行；Android 使用系统文件选择器（SAF）导入。
 
@@ -7,11 +7,12 @@
 - **本地导入**：桌面端内置文件浏览器（多选、路径输入、快捷访问、磁盘切换）；Android 端调用系统文件选择器（Storage Access Framework）。文件会复制进应用自己的书库，原文件移动/删除不影响阅读。
 - **编码自动识别**：UTF-8（含 BOM / 轻微损坏）、UTF-16 LE/BE、GBK/GB2312；不会把 GBK 误判成 UTF-8。
 - **自动分章**：支持 `第12章` / `第十二回` / `001 标题` / `Chapter 12` / `序章` `楔子` `番外` 等格式；无章节的书会按段落自动分节。文件名里的站点前缀、作者信息会自动清理。
-- **书架**：最近阅读/导入时间/书名排序，阅读进度、章节位置、书籍信息与删除。
-- **沉浸阅读**：分页排版、章节标题页、5 种阅读主题、3 款内置字体、字号/行距调节、目录搜索、进度拖动跳转。
-- **翻页方式**：点击左右区域、左右滑动、鼠标滚轮、方向键/空格/PageUp/PageDown；`M` 菜单、`T` 目录、`S` 排版、`N` 夜间、`Esc` 返回。
-- **进度保存**：翻页后自动保存章节与字符位置，下次打开直接回到上次读到的地方。
-- **离线**：所有书籍、设置、进度都保存在本机。
+- **书架与历程**：最近阅读/导入时间/书名排序，网格与双栏列表自适应切换，阅读进度、「拾卷印记」每日目标与连续阅读连击、8 枚朱砂篆刻印章成就墙。
+- **沉浸阅读**：单页居中与宽屏双页对开自适应排版（支持`自动 / 单页 / 双页`切换）、章节标题页、5 种阅读主题、3 款内置字体、字号/行距调节、页缘丝带书签夹、目录搜索与书签双标签跳转、进度拖动跳转、圆满合卷仪式。
+- **翻页与控制**：点击左右区域、左右滑动、鼠标滚轮、方向键/空格/PageUp/PageDown；`M` 菜单、`T` 目录、`B` 书签、`S` 排版、`N` 夜间、`H` 帮助、`Esc` 返回。
+- **进度与书签保存**：翻页后自动保存章节与字符位置，书签与阅读历程分别本地持久化，下次打开直接回到上次读到的地方。
+- **多端自适应**：一套代码自适应手机竖屏、横屏、平板及 Windows 桌面窗口；宽屏端目录自动以右侧抽屉呈现、排版工坊与印记以居中浮窗展开。
+- **离线**：所有书籍、书签、设置、进度与阅读统计都保存在本机。
 
 ## 运行
 
@@ -24,7 +25,7 @@ flutter run -d windows
 
 ```bash
 flutter build windows --release
-# 产物：build\windows\x64\runner\Release\modu_reader.exe
+# 产物：build\windows\x64\runner\Release\shijuan_reader.exe
 ```
 
 构建 Android APK（需要 JDK 17+，通过 `JAVA_HOME` 指定）：
@@ -54,21 +55,23 @@ flutter test
 
 | 平台 | 位置 |
 | --- | --- |
-| Windows | `%LOCALAPPDATA%\ModuReader` |
-| macOS | `~/Library/Application Support/ModuReader` |
-| Linux | `$XDG_DATA_HOME/modu-reader` 或 `~/.local/share/modu-reader` |
-| Android | 应用私有 files 目录（由系统提供；主用户为 `/data/user/0/com.modu.modu_reader/files`，工作资料、隐私空间等按实际用户区分） |
+| Windows | `%LOCALAPPDATA%\ShijuanReader` |
+| macOS | `~/Library/Application Support/ShijuanReader` |
+| Linux | `$XDG_DATA_HOME/shijuan-reader` 或 `~/.local/share/shijuan-reader` |
+| Android | 应用私有 files 目录（由系统提供；主用户为 `/data/user/0/com.shijuan.shijuan_reader/files`，工作资料、隐私空间等按实际用户区分） |
 
-可用环境变量 `MODU_DATA_DIR` 覆盖（测试与调试用）。目录内容：
+可用环境变量 `SHIJUAN_DATA_DIR` 覆盖（测试与调试用）。目录内容：
 
 ```
-ModuReader/
+ShijuanReader/
   library.json          # 书架元数据与阅读进度
   library.json.bak      # 上一次成功写入的索引副本
-  settings.json         # 阅读主题 / 字号 / 行距 / 字体 / 排序
+  settings.json         # 阅读主题 / 字号 / 行距 / 字体 / 布局 / 排序
+  reading_stats.json    # 每日阅读时长、连续天数与朱砂印章解锁记录
   books/<id>/
     content.txt         # 规范化后的 UTF-8 正文（段落一行、两字缩进）
     chapters.json       # 章节标题与字符偏移
+    bookmarks.json      # 本书丝带书签摘录与字符位置
     book.json           # 这本书自己的元数据与进度
 ```
 
@@ -78,19 +81,20 @@ ModuReader/
 
 ```
 lib/
-  core/                 路径、格式化、主题与三套阅读字体排版
+  core/                 路径、品牌图标、印章绘制、响应式断点、主题与三套阅读字体
   data/
-    models/             Book / Chapter / ReaderSettings
+    models/             Book / Chapter / ReaderSettings / ReadingStats
     txt/                编码识别、TXT 规范化与分章
-    library_repository  书库导入、复制、进度持久化
+    library_repository  书库导入、复制、进度与书签持久化
     settings_repository 设置持久化
+    stats_repository    阅读统计与印章成就持久化
   features/
-    bookshelf/          书架、书卡、书籍信息
+    bookshelf/          书架、书卡、书籍信息、拾卷印记成就面板
     import/             桌面端内置文件浏览器
-    reader/             分页器、阅读控制器、阅读页、目录/设置面板
+    reader/             分页器、阅读控制器（含双页对开）、阅读页、目录书签/排版面板
   data/native_import.dart  Android 系统文件选择器桥接
 tool/                   分章报告与书库播种脚本
-assets/fonts/           OFL 授权的阅读字体子集与许可说明
+assets/                 应用图标图片与 OFL 授权的阅读字体子集
 ```
 
 ## 字体
@@ -99,6 +103,6 @@ assets/fonts/           OFL 授权的阅读字体子集与许可说明
 
 ## 已知限制
 
-- 暂无书签、笔记、TTS、EPUB 等扩展功能。
+- 已支持丝带书签夹与摘录跳转；暂无划线笔记、TTS、EPUB 等扩展功能。
 - 超长单章（> 2 万字）会自动拆成「（续 N）」章节，避免一次排版过大。
 - Android release 构建目前使用 debug 签名，适合本地安装；上架前请配置正式签名。

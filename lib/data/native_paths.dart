@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 class NativePaths {
   NativePaths._();
 
-  static const MethodChannel _channel = MethodChannel('modu/native');
+  static const MethodChannel _channel = MethodChannel('shijuan/native');
 
   /// The app's private files directory, as reported by
   /// `Context.getFilesDir()`. Null when the platform cannot answer.

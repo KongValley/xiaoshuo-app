@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 class NativeImport {
   NativeImport._();
 
-  static const MethodChannel _channel = MethodChannel('modu/native');
+  static const MethodChannel _channel = MethodChannel('shijuan/native');
 
   /// Opens the system picker and returns local copies of the selected TXT
   /// files. Returns an empty list when the user cancels.

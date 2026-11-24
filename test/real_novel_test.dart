@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modu_reader/data/txt/parser.dart';
+import 'package:shijuan_reader/data/txt/parser.dart';
 import 'package:path/path.dart' as p;
 
 /// Integration check against the novel that ships in the project root.

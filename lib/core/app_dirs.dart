@@ -7,7 +7,7 @@ import 'package:path/path.dart' as p;
 /// the library index and settings.
 ///
 /// No plugin is used. On desktop the location is derived from the platform's
-/// standard application-data environment variables; `MODU_DATA_DIR` can
+/// standard application-data environment variables; `SHIJUAN_DATA_DIR` can
 /// override it, which is handy for tests and for the `tool/seed_library.dart`
 /// helper.
 class AppDirs {
@@ -46,8 +46,8 @@ class AppDirs {
 
   /// Private file locations Android is known to use for this package.
   static const List<String> androidCandidates = [
-    '/data/user/0/com.modu.modu_reader/files',
-    '/data/data/com.modu.modu_reader/files',
+    '/data/user/0/com.shijuan.shijuan_reader/files',
+    '/data/data/com.shijuan.shijuan_reader/files',
   ];
 
   /// Returns the first directory that exists or can be created. A profile the
@@ -65,11 +65,12 @@ class AppDirs {
         // Not this profile, or not permitted: try the next one.
       }
     }
-    return Directory(p.join(Directory.systemTemp.path, 'ModuReader'));
+    return Directory(p.join(Directory.systemTemp.path, 'ShijuanReader'));
   }
 
   static Directory? _overrideDir() {
-    final override = Platform.environment['MODU_DATA_DIR'];
+    final override = Platform.environment['SHIJUAN_DATA_DIR'] ??
+        Platform.environment['MODU_DATA_DIR'];
     if (override == null || override.trim().isEmpty) return null;
     return Directory(p.normalize(override.trim()));
   }
@@ -80,18 +81,18 @@ class AppDirs {
       final base = Platform.environment['LOCALAPPDATA'] ??
           Platform.environment['APPDATA'] ??
           Directory.current.path;
-      return Directory(p.join(base, 'ModuReader'));
+      return Directory(p.join(base, 'ShijuanReader'));
     }
     if (Platform.isMacOS) {
-      return Directory(p.join(home, 'Library', 'Application Support', 'ModuReader'));
+      return Directory(p.join(home, 'Library', 'Application Support', 'ShijuanReader'));
     }
     if (Platform.isLinux) {
       final base = Platform.environment['XDG_DATA_HOME'];
       return Directory(p.join(
         (base == null || base.isEmpty) ? p.join(home, '.local', 'share') : base,
-        'modu-reader',
+        'shijuan-reader',
       ));
     }
-    return Directory(p.join(Directory.systemTemp.path, 'ModuReader'));
+    return Directory(p.join(Directory.systemTemp.path, 'ShijuanReader'));
   }
 }

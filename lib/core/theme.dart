@@ -6,34 +6,38 @@ import '../data/models/reader_settings.dart';
 class AppTheme {
   AppTheme._();
 
-  static const Color seed = Color(0xFF7C5836);
+  static const Color seed = Color(0xFF785233);
 
   static ThemeData light() {
     final scheme = ColorScheme.fromSeed(
       seedColor: seed,
       brightness: Brightness.light,
     ).copyWith(
-      primary: const Color(0xFF775535),
+      primary: const Color(0xFF734F30),
       onPrimary: Colors.white,
-      primaryContainer: const Color(0xFFF0E1C9),
-      onPrimaryContainer: const Color(0xFF3B2A17),
-      secondary: const Color(0xFF8D7050),
-      surface: const Color(0xFFFFFDF8),
-      onSurface: const Color(0xFF2A241C),
-      outline: const Color(0xFFE2D5BF),
-      outlineVariant: const Color(0xFFEFE5D3),
+      primaryContainer: const Color(0xFFEFDFC6),
+      onPrimaryContainer: const Color(0xFF3A2715),
+      secondary: const Color(0xFF8C6D4D),
+      surface: const Color(0xFFFFFCF6),
+      onSurface: const Color(0xFF262018),
+      outline: const Color(0xFFE0D2BA),
+      outlineVariant: const Color(0xFFEDE2CE),
+      error: const Color(0xFFB73E2B),
     );
 
     return _base(
       scheme: scheme,
-      scaffold: const Color(0xFFF8F3E9),
+      scaffold: const Color(0xFFF7F2E7),
       surfaceExt: const AppSurface(
-        canvasTop: Color(0xFFFBF7EE),
-        canvasBottom: Color(0xFFF4EDDF),
-        hairline: Color(0xFFE6DAC5),
-        muted: Color(0xFF8C7F6B),
-        card: Color(0xFFFFFCF5),
-        tint: Color(0xFFF1E6D1),
+        canvasTop: Color(0xFFFAF5EA),
+        canvasBottom: Color(0xFFF1E9D8),
+        hairline: Color(0xFFE4D7C1),
+        muted: Color(0xFF857763),
+        card: Color(0xFFFFFCF7),
+        tint: Color(0xFFEFE4CE),
+        elevated: Color(0xFFFFFFFF),
+        seal: Color(0xFFC1442D),
+        sealSoft: Color(0x16C1442D),
       ),
     );
   }
@@ -44,26 +48,30 @@ class AppTheme {
       brightness: Brightness.dark,
     ).copyWith(
       primary: const Color(0xFFD9B487),
-      onPrimary: const Color(0xFF33240F),
-      primaryContainer: const Color(0xFF4A3820),
-      onPrimaryContainer: const Color(0xFFF2DFC4),
-      secondary: const Color(0xFFC5A57E),
-      surface: const Color(0xFF1E1A15),
-      onSurface: const Color(0xFFEDE4D5),
-      outline: const Color(0xFF3A332A),
-      outlineVariant: const Color(0xFF2C2720),
+      onPrimary: const Color(0xFF2E200D),
+      primaryContainer: const Color(0xFF47351D),
+      onPrimaryContainer: const Color(0xFFF3E0C5),
+      secondary: const Color(0xFFC1A17A),
+      surface: const Color(0xFF1D1914),
+      onSurface: const Color(0xFFECE2D2),
+      outline: const Color(0xFF393127),
+      outlineVariant: const Color(0xFF2A241D),
+      error: const Color(0xFFE06D58),
     );
 
     return _base(
       scheme: scheme,
-      scaffold: const Color(0xFF14120E),
+      scaffold: const Color(0xFF14110D),
       surfaceExt: const AppSurface(
-        canvasTop: Color(0xFF191611),
-        canvasBottom: Color(0xFF12100C),
-        hairline: Color(0xFF332D24),
-        muted: Color(0xFF9A8D79),
-        card: Color(0xFF211C16),
-        tint: Color(0xFF2A231A),
+        canvasTop: Color(0xFF191510),
+        canvasBottom: Color(0xFF100E0A),
+        hairline: Color(0xFF312A21),
+        muted: Color(0xFF9B8E7A),
+        card: Color(0xFF201B15),
+        tint: Color(0xFF2A231B),
+        elevated: Color(0xFF27211A),
+        seal: Color(0xFFD8644B),
+        sealSoft: Color(0x22D8644B),
       ),
     );
   }
@@ -117,12 +125,12 @@ class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
           textStyle: const TextStyle(
-            fontSize: 14,
+            fontSize: 13.5,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.3,
           ),
@@ -163,7 +171,8 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: surfaceExt.card,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         hintStyle: TextStyle(color: surfaceExt.muted, fontSize: 13.5),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -187,16 +196,15 @@ class AppTheme {
         ),
         decoration: BoxDecoration(
           color: scheme.onSurface.withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(7),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       ),
       extensions: <ThemeExtension<dynamic>>[surfaceExt],
     );
   }
 
-  /// Literary serif used for the wordmark and book covers. It falls back to
-  /// whatever serif CJK font the system provides.
+  /// Literary serif used for the wordmark and book covers.
   static TextStyle serif(
     double size, {
     FontWeight weight = FontWeight.w600,
@@ -227,6 +235,9 @@ class AppSurface extends ThemeExtension<AppSurface> {
     required this.muted,
     required this.card,
     required this.tint,
+    required this.elevated,
+    required this.seal,
+    required this.sealSoft,
   });
 
   final Color canvasTop;
@@ -235,6 +246,9 @@ class AppSurface extends ThemeExtension<AppSurface> {
   final Color muted;
   final Color card;
   final Color tint;
+  final Color elevated;
+  final Color seal;
+  final Color sealSoft;
 
   @override
   AppSurface copyWith({
@@ -244,6 +258,9 @@ class AppSurface extends ThemeExtension<AppSurface> {
     Color? muted,
     Color? card,
     Color? tint,
+    Color? elevated,
+    Color? seal,
+    Color? sealSoft,
   }) =>
       AppSurface(
         canvasTop: canvasTop ?? this.canvasTop,
@@ -252,6 +269,9 @@ class AppSurface extends ThemeExtension<AppSurface> {
         muted: muted ?? this.muted,
         card: card ?? this.card,
         tint: tint ?? this.tint,
+        elevated: elevated ?? this.elevated,
+        seal: seal ?? this.seal,
+        sealSoft: sealSoft ?? this.sealSoft,
       );
 
   @override
@@ -264,6 +284,9 @@ class AppSurface extends ThemeExtension<AppSurface> {
       muted: Color.lerp(muted, other.muted, t)!,
       card: Color.lerp(card, other.card, t)!,
       tint: Color.lerp(tint, other.tint, t)!,
+      elevated: Color.lerp(elevated, other.elevated, t)!,
+      seal: Color.lerp(seal, other.seal, t)!,
+      sealSoft: Color.lerp(sealSoft, other.sealSoft, t)!,
     );
   }
 }
@@ -298,61 +321,61 @@ class ReaderPalette {
   static const ReaderPalette paper = ReaderPalette(
     id: ReaderThemeId.paper,
     label: '纸黄',
-    top: Color(0xFFF8F1E2),
-    bottom: Color(0xFFF1E7D3),
-    text: Color(0xFF352E24),
-    muted: Color(0xFF8A7E6A),
-    accent: Color(0xFF8A5A34),
-    chrome: Color(0xFFFBF6EB),
-    divider: Color(0xFFE3D5BD),
+    top: Color(0xFFF7F0E0),
+    bottom: Color(0xFFEEE3CD),
+    text: Color(0xFF332B21),
+    muted: Color(0xFF887A65),
+    accent: Color(0xFF935531),
+    chrome: Color(0xFFFAF4E7),
+    divider: Color(0xFFE0D1B8),
   );
 
   static const ReaderPalette white = ReaderPalette(
     id: ReaderThemeId.white,
     label: '纯白',
     top: Color(0xFFFFFFFF),
-    bottom: Color(0xFFF9F8F5),
-    text: Color(0xFF23262A),
-    muted: Color(0xFF8B9097),
-    accent: Color(0xFF7A5B3A),
+    bottom: Color(0xFFF8F7F3),
+    text: Color(0xFF22252A),
+    muted: Color(0xFF878C94),
+    accent: Color(0xFF7D5937),
     chrome: Color(0xFFFFFFFF),
-    divider: Color(0xFFE8E5DF),
+    divider: Color(0xFFE7E3DC),
   );
 
   static const ReaderPalette green = ReaderPalette(
     id: ReaderThemeId.green,
     label: '护眼',
-    top: Color(0xFFE9F1E3),
-    bottom: Color(0xFFDCE8D5),
-    text: Color(0xFF2C372B),
-    muted: Color(0xFF72826D),
-    accent: Color(0xFF53734B),
+    top: Color(0xFFEAF2E4),
+    bottom: Color(0xFFDCE8D4),
+    text: Color(0xFF2A3629),
+    muted: Color(0xFF6F806A),
+    accent: Color(0xFF4D6F45),
     chrome: Color(0xFFF0F6EB),
-    divider: Color(0xFFC9D9BE),
+    divider: Color(0xFFC8D9BD),
   );
 
   static const ReaderPalette night = ReaderPalette(
     id: ReaderThemeId.night,
     label: '夜间',
-    top: Color(0xFF16181D),
-    bottom: Color(0xFF0E1013),
-    text: Color(0xFFAEB4BF),
-    muted: Color(0xFF6E7683),
-    accent: Color(0xFFC2A26A),
-    chrome: Color(0xFF1B1E24),
-    divider: Color(0xFF2A2E36),
+    top: Color(0xFF17191E),
+    bottom: Color(0xFF101216),
+    text: Color(0xFFB3B9C4),
+    muted: Color(0xFF6F7785),
+    accent: Color(0xFFC9A66B),
+    chrome: Color(0xFF1C1F26),
+    divider: Color(0xFF2C313B),
   );
 
   static const ReaderPalette ink = ReaderPalette(
     id: ReaderThemeId.ink,
     label: '墨黑',
-    top: Color(0xFF050505),
+    top: Color(0xFF060606),
     bottom: Color(0xFF000000),
-    text: Color(0xFF9AA0A6),
-    muted: Color(0xFF5E636A),
-    accent: Color(0xFFB99A63),
-    chrome: Color(0xFF0B0B0B),
-    divider: Color(0xFF1F1F1F),
+    text: Color(0xFF9AA0A8),
+    muted: Color(0xFF5D6269),
+    accent: Color(0xFFC09E64),
+    chrome: Color(0xFF0D0D0D),
+    divider: Color(0xFF202020),
   );
 
   static const List<ReaderPalette> all = [paper, white, green, night, ink];
@@ -399,20 +422,22 @@ class ReaderTypography {
 }
 
 class CoverPalette {
-  const CoverPalette(this.start, this.end, this.ink);
+  const CoverPalette(this.start, this.end, this.ink, this.accent);
 
   final Color start;
   final Color end;
   final Color ink;
+  final Color accent;
 }
 
 const List<CoverPalette> coverPalettes = [
-  CoverPalette(Color(0xFF42604F), Color(0xFF22352B), Color(0xFFE8D9B8)),
-  CoverPalette(Color(0xFF7A4B3A), Color(0xFF45271F), Color(0xFFF0DCC4)),
-  CoverPalette(Color(0xFF4A4C6E), Color(0xFF292A44), Color(0xFFE2D8C6)),
-  CoverPalette(Color(0xFF8A6A3B), Color(0xFF4C3A1F), Color(0xFFF3E3C4)),
-  CoverPalette(Color(0xFF5E3B4E), Color(0xFF33222B), Color(0xFFEED9D2)),
-  CoverPalette(Color(0xFF33566A), Color(0xFF1D3240), Color(0xFFDCE7E4)),
+  CoverPalette(Color(0xFF3E5B4B), Color(0xFF203228), Color(0xFFEEE0C3), Color(0xFFC96449)),
+  CoverPalette(Color(0xFF774636), Color(0xFF42241C), Color(0xFFF2DFC7), Color(0xFFD89E68)),
+  CoverPalette(Color(0xFF444869), Color(0xFF24273F), Color(0xFFE6DCCB), Color(0xFFC96850)),
+  CoverPalette(Color(0xFF836237), Color(0xFF47351B), Color(0xFFF5E6C8), Color(0xFFC65A3D)),
+  CoverPalette(Color(0xFF5A374A), Color(0xFF311E28), Color(0xFFF0DBD5), Color(0xFFD28B63)),
+  CoverPalette(Color(0xFF2F5366), Color(0xFF1A2F3D), Color(0xFFE0ECE8), Color(0xFFCC684C)),
+  CoverPalette(Color(0xFF4D423A), Color(0xFF29221E), Color(0xFFEFE3CF), Color(0xFFC4523A)),
 ];
 
 CoverPalette coverPaletteFor(String seed) {
