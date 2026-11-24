@@ -47,6 +47,8 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   bool _searchOpen = false;
   String _searchQuery = '';
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = <String>{};
   bool _importing = false;
   String _importStatus = '';
   double? _importProgress;
@@ -246,6 +248,138 @@ class _BookshelfPageState extends State<BookshelfPage> {
       if (!mounted) return;
       setState(() => _importing = false);
       _showSnack('导入失败：$error');
+    } finally {
+      if (Platform.isAndroid) {
+        unawaited(NativeImport.clearImportCache());
+      }
+    }
+  }
+
+  void _toggleSelectionMode([bool? enabled]) {
+    final next = enabled ?? !_selectionMode;
+    if (next && mounted) {
+      ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+    }
+    setState(() {
+      _selectionMode = next;
+      if (!_selectionMode) _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelectBook(String bookId) {
+    setState(() {
+      if (!_selectedIds.add(bookId)) _selectedIds.remove(bookId);
+    });
+  }
+
+  void _toggleSelectAllBooks(List<Book> visibleBooks) {
+    if (visibleBooks.isEmpty) return;
+    final allSelected = visibleBooks.every((b) => _selectedIds.contains(b.id));
+    setState(() {
+      if (allSelected) {
+        for (final b in visibleBooks) {
+          _selectedIds.remove(b.id);
+        }
+      } else {
+        for (final b in visibleBooks) {
+          _selectedIds.add(b.id);
+        }
+      }
+    });
+  }
+
+  Future<void> _confirmBatchReset(List<Book> allBooks) async {
+    final targets = allBooks
+        .where((b) => _selectedIds.contains(b.id) && b.progress.isStarted)
+        .toList();
+    if (targets.isEmpty) {
+      _showSnack('所选书籍暂无需要重置的阅读进度');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return AlertDialog(
+          backgroundColor: theme.colorScheme.surface,
+          surfaceTintColor: Colors.transparent,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Text('批量重置进度'),
+          content: Text(
+            '确定要清除已选 ${targets.length} 本书的阅读进度吗？',
+            style: const TextStyle(fontSize: 13.5, height: 1.6),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('重置'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    await widget.library.resetBooksProgress(targets.map((b) => b.id));
+    if (!mounted) return;
+    _toggleSelectionMode(false);
+    _showSnack('已重置 ${targets.length} 本书的阅读进度');
+  }
+
+  Future<void> _confirmBatchDelete(List<Book> allBooks) async {
+    final targets = allBooks.where((b) => _selectedIds.contains(b.id)).toList();
+    if (targets.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return AlertDialog(
+          backgroundColor: theme.colorScheme.surface,
+          surfaceTintColor: Colors.transparent,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Text('批量移出书架'),
+          content: Text(
+            '确定要删除所选 ${targets.length} 本书在应用内的本地副本与书签吗？\n'
+            '原始文件不会被删除。',
+            style: const TextStyle(fontSize: 13.5, height: 1.6),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: theme.colorScheme.error,
+              ),
+              child: const Text('删除'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    await widget.library.deleteBooks(targets);
+    if (!mounted) return;
+    _toggleSelectionMode(false);
+    _showSnack('已将 ${targets.length} 本书移出书架');
+  }
+
+  Future<void> _compressLegacyBooks() async {
+    final result = await widget.library.compressLegacyBooks();
+    if (!mounted) return;
+    if (result.converted == 0) {
+      _showSnack('所有书籍副本均已是压缩格式');
+    } else {
+      _showSnack(
+        '已压缩 ${result.converted} 本旧书副本，释放 ${Fmt.fileSize(result.savedBytes)} 空间',
+      );
     }
   }
 
@@ -340,7 +474,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           title: const Text('移出书架'),
           content: Text(
-            '将从本地书库删除《${book.title}》及应用内的副本。\n原始 TXT 文件不会被删除。',
+            '将从本地书库删除《${book.title}》及应用内的副本。\n原始文件不会被删除。',
             style: const TextStyle(fontSize: 13.5, height: 1.6),
           ),
           actions: [
@@ -382,9 +516,15 @@ class _BookshelfPageState extends State<BookshelfPage> {
   Future<void> _showAboutDialog() async {
     await showDialog<void>(
       context: context,
-      builder: (context) => _AboutShijuanDialog(
-        bookCount: widget.library.books.length,
-        dataDir: widget.library.booksDirectory.parent.path,
+      builder: (context) => AnimatedBuilder(
+        animation: widget.library,
+        builder: (context, _) => _AboutShijuanDialog(
+          bookCount: widget.library.books.length,
+          storageBytes: widget.library.storageBytes,
+          legacyUncompressedCount: widget.library.legacyUncompressedCount,
+          dataDir: widget.library.booksDirectory.parent.path,
+          onCompressLegacy: _compressLegacyBooks,
+        ),
       ),
     );
   }
@@ -476,6 +616,8 @@ class _BookshelfPageState extends State<BookshelfPage> {
         );
         final contentWidth = math.max(240.0, windowWidth - horizontalInset * 2);
         final columns = adaptive.shelfGridColumns(contentWidth);
+        final selecting = _selectionMode && allSorted.isNotEmpty;
+        final listBottomPadding = selecting ? 96.0 : 36.0;
 
         return CallbackShortcuts(
           bindings: <ShortcutActivator, VoidCallback>{
@@ -484,7 +626,11 @@ class _BookshelfPageState extends State<BookshelfPage> {
               if (allSorted.isNotEmpty && !_searchOpen) _toggleSearch();
             },
             const SingleActivator(LogicalKeyboardKey.escape): () {
-              if (_searchOpen) _toggleSearch();
+              if (_selectionMode) {
+                _toggleSelectionMode(false);
+              } else if (_searchOpen) {
+                _toggleSearch();
+              }
             },
           },
           child: Scaffold(
@@ -631,7 +777,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                               horizontalInset,
                               20,
                               horizontalInset,
-                              36,
+                              listBottomPadding,
                             ),
                             sliver: SliverGrid(
                               gridDelegate:
@@ -648,6 +794,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
                                   return BookCard(
                                     key: ValueKey(book.id),
                                     book: book,
+                                    selectionMode: selecting,
+                                    selected: _selectedIds.contains(book.id),
+                                    onToggleSelect: () =>
+                                        _toggleSelectBook(book.id),
                                     onOpen: () => _openBook(book),
                                     onInfo: () => _showBookInfo(book),
                                     onResetProgress: () =>
@@ -665,7 +815,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                               horizontalInset,
                               18,
                               horizontalInset,
-                              36,
+                              listBottomPadding,
                             ),
                             sliver: SliverGrid(
                               gridDelegate:
@@ -681,6 +831,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
                                   return BookListTile(
                                     key: ValueKey('list_${book.id}'),
                                     book: book,
+                                    selectionMode: selecting,
+                                    selected: _selectedIds.contains(book.id),
+                                    onToggleSelect: () =>
+                                        _toggleSelectBook(book.id),
                                     onOpen: () => _openBook(book),
                                     onInfo: () => _showBookInfo(book),
                                     onResetProgress: () =>
@@ -698,7 +852,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                               horizontalInset,
                               18,
                               horizontalInset,
-                              36,
+                              listBottomPadding,
                             ),
                             sliver: SliverList.separated(
                               itemCount: filtered.length,
@@ -709,6 +863,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
                                 return BookListTile(
                                   key: ValueKey('list_${book.id}'),
                                   book: book,
+                                  selectionMode: selecting,
+                                  selected: _selectedIds.contains(book.id),
+                                  onToggleSelect: () =>
+                                      _toggleSelectBook(book.id),
                                   onOpen: () => _openBook(book),
                                   onInfo: () => _showBookInfo(book),
                                   onResetProgress: () =>
@@ -722,6 +880,32 @@ class _BookshelfPageState extends State<BookshelfPage> {
                     ],
                   ),
                 ),
+                if (selecting)
+                  Positioned(
+                    left: horizontalInset,
+                    right: horizontalInset,
+                    bottom: MediaQuery.paddingOf(context).bottom + 14,
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 680),
+                        child: _BatchSelectionBar(
+                          selectedCount: _selectedIds
+                              .where((id) => allSorted.any((b) => b.id == id))
+                              .length,
+                          allVisibleSelected: filtered.isNotEmpty &&
+                              filtered
+                                  .every((b) => _selectedIds.contains(b.id)),
+                          theme: theme,
+                          surface: surface,
+                          onToggleSelectAll: () =>
+                              _toggleSelectAllBooks(filtered),
+                          onReset: () => _confirmBatchReset(allSorted),
+                          onDelete: () => _confirmBatchDelete(allSorted),
+                          onDone: () => _toggleSelectionMode(false),
+                        ),
+                      ),
+                    ),
+                  ),
                 if (_importing)
                   Positioned.fill(
                     child: _ImportOverlay(
@@ -753,12 +937,15 @@ class _BookshelfPageState extends State<BookshelfPage> {
     final themePref = widget.settings.settings.themePreference;
     final narrow = adaptive.isCompact;
     final tight = adaptive.width < 380;
+    final storageNote = widget.library.storageBytes > 0
+        ? ' · 占用 ${Fmt.fileSize(widget.library.storageBytes)}'
+        : '';
 
     final subtitle = allBooks.isEmpty
         ? '你的私人离线书库'
         : (_searchQuery.trim().isNotEmpty
             ? '找到 ${visibleBooks.length} / ${allBooks.length} 本'
-            : '${allBooks.length} 本藏书 · 共 ${Fmt.charCount(totalChars)}');
+            : '${allBooks.length} 本藏书 · 共 ${Fmt.charCount(totalChars)}$storageNote');
 
     final themeIcon = switch (themePref) {
       AppThemePreference.system => Icons.brightness_auto_rounded,
@@ -776,6 +963,15 @@ class _BookshelfPageState extends State<BookshelfPage> {
           surface: surface,
           theme: theme,
           onTap: _toggleSearch,
+        ),
+        SizedBox(width: controlGap),
+        _HeaderIconButton(
+          tooltip: _selectionMode ? '退出批量管理' : '批量管理',
+          icon: Icons.checklist_rounded,
+          active: _selectionMode,
+          surface: surface,
+          theme: theme,
+          onTap: _toggleSelectionMode,
         ),
         SizedBox(width: controlGap),
         _HeaderIconButton(
@@ -944,7 +1140,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
                   ),
                 ),
                 icon: const Icon(Icons.add_rounded, size: 19),
-                label: const Text('导入 TXT'),
+                label: const Text('导入书籍'),
               ),
             ],
           ),
@@ -1325,7 +1521,7 @@ class _EmptyShelf extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              '导入本地 TXT 小说，自动识别编码与章节\n阅读进度会一直保留在书库中',
+              '支持导入本地 TXT、EPUB、MOBI、PDF、Word 文档\n自动识别编码、拆分目录并压缩保存在书库中',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -1337,7 +1533,7 @@ class _EmptyShelf extends StatelessWidget {
             FilledButton.icon(
               onPressed: onImport,
               icon: const Icon(Icons.folder_open_rounded, size: 18),
-              label: const Text('选择 TXT 文件'),
+              label: const Text('选择本地书籍'),
             ),
             const SizedBox(height: 22),
             Wrap(
@@ -1345,9 +1541,9 @@ class _EmptyShelf extends StatelessWidget {
               runSpacing: 8,
               alignment: WrapAlignment.center,
               children: [
-                _FeatureChip(label: 'UTF-8 / GBK / UTF-16', surface: surface),
-                _FeatureChip(label: '智能章节识别', surface: surface),
-                _FeatureChip(label: '纯净本地离线', surface: surface),
+                _FeatureChip(label: 'TXT · EPUB · MOBI', surface: surface),
+                _FeatureChip(label: 'PDF · Word 支持', surface: surface),
+                _FeatureChip(label: '压缩存储 · 纯净离线', surface: surface),
               ],
             ),
           ],
@@ -1492,7 +1688,7 @@ class _ImportOverlay extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      '自动检测编码、拆分章节并复制到本地书库',
+                      '自动解析文档结构、识别章节并压缩存入本地书库',
                       style: TextStyle(
                         fontSize: 11,
                         height: 1.5,
@@ -1708,11 +1904,17 @@ class _BookInfoDialog extends StatelessWidget {
 class _AboutShijuanDialog extends StatelessWidget {
   const _AboutShijuanDialog({
     required this.bookCount,
+    required this.storageBytes,
+    required this.legacyUncompressedCount,
     required this.dataDir,
+    required this.onCompressLegacy,
   });
 
   final int bookCount;
+  final int storageBytes;
+  final int legacyUncompressedCount;
   final String dataDir;
+  final VoidCallback onCompressLegacy;
 
   @override
   Widget build(BuildContext context) {
@@ -1724,7 +1926,7 @@ class _AboutShijuanDialog extends StatelessWidget {
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
+        constraints: const BoxConstraints(maxWidth: 460),
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(26, 28, 26, 20),
           child: Column(
@@ -1742,13 +1944,21 @@ class _AboutShijuanDialog extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                '静心离线 · 本地 TXT 小说阅读器',
+                '静心离线 · 多格式本地书库阅读器',
                 style: TextStyle(fontSize: 12.5, color: surface.muted),
               ),
               const SizedBox(height: 18),
               Divider(height: 1, color: surface.hairline),
               const SizedBox(height: 14),
-              _InfoRow(label: '当前藏书', value: '$bookCount 本'),
+              _InfoRow(
+                label: '当前藏书',
+                value:
+                    '$bookCount 本 · 占用 ${Fmt.fileSize(storageBytes)}（Gzip 压缩存储）',
+              ),
+              _InfoRow(
+                label: '支持格式',
+                value: 'TXT · EPUB · MOBI · AZW3 · PDF · Word',
+              ),
               _InfoRow(label: '书库目录', value: dataDir),
               _InfoRow(
                 label: '内置字体',
@@ -1758,6 +1968,40 @@ class _AboutShijuanDialog extends StatelessWidget {
                 label: '阅读快捷键',
                 value: '← → 空格翻页 · M 菜单 · T 目录 · S 排版 · N 日夜',
               ),
+              if (legacyUncompressedCount > 0) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: surface.tint,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: surface.hairline),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '检测到 $legacyUncompressedCount 本旧版未压缩书籍，可一键压缩以节省约 50% 空间',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: surface.muted,
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          onCompressLegacy();
+                        },
+                        child: const Text('一键压缩'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerRight,
@@ -1769,6 +2013,166 @@ class _AboutShijuanDialog extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _BatchSelectionBar extends StatelessWidget {
+  const _BatchSelectionBar({
+    required this.selectedCount,
+    required this.allVisibleSelected,
+    required this.theme,
+    required this.surface,
+    required this.onToggleSelectAll,
+    required this.onReset,
+    required this.onDelete,
+    required this.onDone,
+  });
+
+  final int selectedCount;
+  final bool allVisibleSelected;
+  final ThemeData theme;
+  final AppSurface surface;
+  final VoidCallback onToggleSelectAll;
+  final VoidCallback onReset;
+  final VoidCallback onDelete;
+  final VoidCallback onDone;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = theme.colorScheme;
+    final hasSelection = selectedCount > 0;
+
+    List<Widget> buildActionButtons({required bool includeDone}) {
+      return [
+        OutlinedButton.icon(
+          onPressed: onToggleSelectAll,
+          style: OutlinedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          ),
+          icon: Icon(
+            allVisibleSelected
+                ? Icons.deselect_rounded
+                : Icons.select_all_rounded,
+            size: 16,
+          ),
+          label: Text(allVisibleSelected ? '取消全选' : '全选'),
+        ),
+        OutlinedButton.icon(
+          onPressed: hasSelection ? onReset : null,
+          style: OutlinedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          ),
+          icon: const Icon(Icons.restart_alt_rounded, size: 16),
+          label: const Text('重置进度'),
+        ),
+        FilledButton.tonalIcon(
+          onPressed: hasSelection ? onDelete : null,
+          style: FilledButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            foregroundColor: hasSelection ? cs.error : null,
+            backgroundColor: hasSelection
+                ? cs.errorContainer.withValues(alpha: 0.65)
+                : null,
+          ),
+          icon: const Icon(Icons.delete_outline_rounded, size: 16),
+          label: const Text('移出书架'),
+        ),
+        if (includeDone)
+          TextButton(
+            onPressed: onDone,
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            ),
+            child: const Text('完成'),
+          ),
+      ];
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: surface.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.25)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final status = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.checklist_rounded, size: 18, color: cs.primary),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  selectedCount == 0 ? '点击书籍卡片多选' : '已选择 $selectedCount 本',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          );
+
+          if (constraints.maxWidth >= 580) {
+            return Row(
+              children: [
+                Expanded(child: status),
+                const SizedBox(width: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: buildActionButtons(includeDone: true),
+                ),
+              ],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: status),
+                  TextButton(
+                    onPressed: onDone,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                    ),
+                    child: const Text('退出管理'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: buildActionButtons(includeDone: false),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

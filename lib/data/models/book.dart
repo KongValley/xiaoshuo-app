@@ -1,3 +1,5 @@
+import '../../core/formatters.dart';
+
 /// Reading position of a book.
 ///
 /// [charOffset] is an absolute UTF-16 offset into the book content and
@@ -84,6 +86,8 @@ class Book {
   final ReadingProgress progress;
 
   String get displayAuthor => author.trim().isEmpty ? '佚名' : author.trim();
+
+  String get formatTag => Fmt.formatTagForPath(fileName);
 
   Book copyWith({
     String? id,

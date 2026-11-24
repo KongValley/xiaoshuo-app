@@ -306,7 +306,7 @@ void main() {
       if (find.text('alpha.txt').evaluate().isNotEmpty) break;
     }
 
-    expect(find.text('导入本地小说'), findsOneWidget);
+    expect(find.text('导入本地书籍'), findsOneWidget);
     expect(find.text('alpha.txt'), findsOneWidget);
     expect(find.text('beta.txt'), findsOneWidget);
 

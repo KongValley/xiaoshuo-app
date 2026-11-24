@@ -11,7 +11,7 @@ import '../core/formatters.dart';
 import '../data/models/book.dart';
 import '../data/models/chapter.dart';
 import '../data/models/reading_stats.dart';
-import 'txt/parser.dart';
+import 'formats/document_parser.dart';
 
 class BookText {
   const BookText({required this.content, required this.chapters});
@@ -58,13 +58,9 @@ class RecoveryReport {
   bool get hasRecovery => usedBackupIndex || recoveredBooks > 0;
 }
 
-/// The local book library. Books are copied into the app's own data folder so
-/// they remain available even if the original TXT is moved or deleted.
-///
-/// The shelf is described by `library.json`, which is written through a
-/// temporary file and mirrored to `library.json.bak`. Every book folder also
-/// carries its own `book.json`, so a lost index can always be rebuilt from
-/// what is on disk.
+/// The local book library. Books are copied & compressed into the app's own
+/// data folder (`content.txt.gz`) so they remain available offline even if the
+/// original file is moved or deleted, while keeping disk footprint small.
 class LibraryRepository extends ChangeNotifier {
   LibraryRepository({
     required Directory root,
@@ -87,12 +83,18 @@ class LibraryRepository extends ChangeNotifier {
   bool _loaded = false;
   String? _lastIndexPayload;
   RecoveryReport _recovery = const RecoveryReport();
+  int _storageBytes = 0;
+  int _legacyUncompressedCount = 0;
 
   List<Book> get books => List<Book>.unmodifiable(_books);
 
   Directory get booksDirectory => _booksDir;
 
   RecoveryReport get recovery => _recovery;
+
+  int get storageBytes => _storageBytes;
+
+  int get legacyUncompressedCount => _legacyUncompressedCount;
 
   Future<void> init() async {
     await _booksDir.create(recursive: true);
@@ -153,6 +155,7 @@ class LibraryRepository extends ChangeNotifier {
     }
     _loaded = true;
     await _persistNow();
+    await _refreshStorageMetrics(notify: false);
     notifyListeners();
   }
 
@@ -165,6 +168,9 @@ class LibraryRepository extends ChangeNotifier {
 
   File _contentFile(String id) => File(p.join(_booksDir.path, id, 'content.txt'));
 
+  File _compressedContentFile(String id) =>
+      File(p.join(_booksDir.path, id, 'content.txt.gz'));
+
   File _chaptersFile(String id) => File(p.join(_booksDir.path, id, 'chapters.json'));
 
   File _sidecarFile(String id) => File(p.join(_booksDir.path, id, 'book.json'));
@@ -172,11 +178,25 @@ class LibraryRepository extends ChangeNotifier {
   File _bookmarksFile(String id) =>
       File(p.join(_booksDir.path, id, 'bookmarks.json'));
 
-  Future<bool> _hasBookFiles(String id) async =>
-      await _contentFile(id).exists() && await _chaptersFile(id).exists();
+  Future<bool> _hasBookFiles(String id) async {
+    final hasContent = await _compressedContentFile(id).exists() ||
+        await _contentFile(id).exists();
+    return hasContent && await _chaptersFile(id).exists();
+  }
 
   Future<BookText> loadBookText(Book book) async {
-    final content = await _contentFile(book.id).readAsString(encoding: utf8);
+    final gzFile = _compressedContentFile(book.id);
+    final String content;
+    if (await gzFile.exists()) {
+      final compressed = await gzFile.readAsBytes();
+      if (parseInIsolate && compressed.length > 131072) {
+        content = await Isolate.run(() => utf8.decode(gzip.decode(compressed)));
+      } else {
+        content = utf8.decode(gzip.decode(compressed));
+      }
+    } else {
+      content = await _contentFile(book.id).readAsString(encoding: utf8);
+    }
     final index = await _readChapterIndex(_chaptersFile(book.id));
     return BookText(content: content, chapters: index?.chapters ?? const []);
   }
@@ -207,13 +227,14 @@ class LibraryRepository extends ChangeNotifier {
         encoding: utf8,
         flush: true,
       );
+      unawaited(_refreshStorageMetrics(notify: true));
     } catch (_) {
       // Non-fatal if bookmark write fails.
     }
   }
 
-  /// Imports the given TXT paths. Parsing happens in a background isolate so
-  /// large novels do not freeze the UI.
+  /// Imports supported book files (TXT / EPUB / MOBI / AZW3 / Word / PDF).
+  /// Parsing and gzip compression happen in a background isolate.
   Future<ImportSummary> importPaths(
     List<String> paths, {
     void Function(int completed, int total, String fileName)? onProgress,
@@ -232,8 +253,8 @@ class LibraryRepository extends ChangeNotifier {
           failures.add(ImportFailure(fileName, '文件不存在'));
           continue;
         }
-        if (!Fmt.isTxtFile(path)) {
-          failures.add(ImportFailure(fileName, '仅支持 TXT 文件'));
+        if (!Fmt.isSupportedBookFile(path)) {
+          failures.add(ImportFailure(fileName, '暂不支持此文件格式'));
           continue;
         }
         final size = await file.length();
@@ -245,10 +266,10 @@ class LibraryRepository extends ChangeNotifier {
           continue;
         }
 
-        final parsed = parseInIsolate
-            ? await Isolate.run(() => _parseNovelFile(path))
-            : _parseNovelFile(path);
-        if (parsed.content.trim().isEmpty || parsed.chapters.isEmpty) {
+        final payload = parseInIsolate
+            ? await Isolate.run(() => _parseAndCompress(path))
+            : _parseAndCompress(path);
+        if (payload.charCount == 0 || payload.chapters.isEmpty) {
           failures.add(ImportFailure(fileName, '没有找到可阅读的正文'));
           continue;
         }
@@ -257,11 +278,11 @@ class LibraryRepository extends ChangeNotifier {
         final bookDir = Directory(p.join(_booksDir.path, id));
         await bookDir.create(recursive: true);
         try {
-          await File(p.join(bookDir.path, 'content.txt'))
-              .writeAsString(parsed.content, encoding: utf8, flush: true);
+          await File(p.join(bookDir.path, 'content.txt.gz'))
+              .writeAsBytes(payload.compressedContent, flush: true);
           final index = ChapterIndex(
-            totalChars: parsed.content.length,
-            chapters: parsed.chapters,
+            totalChars: payload.charCount,
+            chapters: payload.chapters,
           );
           await File(p.join(bookDir.path, 'chapters.json')).writeAsString(
             jsonEncode(index.toJson()),
@@ -276,16 +297,16 @@ class LibraryRepository extends ChangeNotifier {
         final now = DateTime.now();
         final book = Book(
           id: id,
-          title: parsed.title,
-          author: parsed.author,
+          title: payload.title,
+          author: payload.author,
           fileName: fileName,
-          encoding: parsed.encoding,
-          charCount: parsed.content.length,
-          chapterCount: parsed.chapters.length,
-          fileSize: parsed.sourceBytes,
+          encoding: payload.encoding,
+          charCount: payload.charCount,
+          chapterCount: payload.chapters.length,
+          fileSize: payload.sourceBytes,
           importedAt: now,
           lastOpenedAt: now,
-          lastChapterTitle: parsed.chapters.first.title,
+          lastChapterTitle: payload.chapters.first.title,
           progress: const ReadingProgress(),
         );
         _books.add(book);
@@ -300,12 +321,60 @@ class LibraryRepository extends ChangeNotifier {
 
     onProgress?.call(paths.length, paths.length, '');
     await _persistNow();
+    await _refreshStorageMetrics(notify: true);
     return ImportSummary(added: added, skipped: skipped, failures: failures);
   }
 
-  static ParsedNovel _parseNovelFile(String path) {
-    final bytes = File(path).readAsBytesSync();
-    return TxtParser.parse(bytes, fileName: p.basename(path));
+  static _ParsedImportPayload _parseAndCompress(String path) {
+    final parsed = DocumentParser.parseFile(path);
+    if (parsed.content.trim().isEmpty || parsed.chapters.isEmpty) {
+      return _ParsedImportPayload(
+        title: parsed.title,
+        author: parsed.author,
+        encoding: parsed.encoding,
+        charCount: 0,
+        sourceBytes: parsed.sourceBytes,
+        chapters: const [],
+        compressedContent: const [],
+      );
+    }
+    final compressed = gzip.encode(utf8.encode(parsed.content));
+    return _ParsedImportPayload(
+      title: parsed.title,
+      author: parsed.author,
+      encoding: parsed.encoding,
+      charCount: parsed.content.length,
+      sourceBytes: parsed.sourceBytes,
+      chapters: parsed.chapters,
+      compressedContent: compressed,
+    );
+  }
+
+  /// Compresses any legacy uncompressed `content.txt` books to `content.txt.gz`.
+  Future<({int converted, int savedBytes})> compressLegacyBooks() async {
+    var converted = 0;
+    var savedBytes = 0;
+    for (final book in List<Book>.from(_books)) {
+      final legacy = _contentFile(book.id);
+      final gz = _compressedContentFile(book.id);
+      if (!await legacy.exists() || await gz.exists()) continue;
+      try {
+        final rawBytes = await legacy.readAsBytes();
+        final compressed = parseInIsolate && rawBytes.length > 131072
+            ? await Isolate.run(() => gzip.encode(rawBytes))
+            : gzip.encode(rawBytes);
+        final temp = File('${gz.path}.tmp');
+        await temp.writeAsBytes(compressed, flush: true);
+        await temp.rename(gz.path);
+        await legacy.delete();
+        converted++;
+        savedBytes += max(0, rawBytes.length - compressed.length);
+      } catch (_) {
+        // Leave the uncompressed copy untouched if conversion failed.
+      }
+    }
+    await _refreshStorageMetrics(notify: true);
+    return (converted: converted, savedBytes: savedBytes);
   }
 
   Future<void> markOpened(Book book) async {
@@ -343,27 +412,74 @@ class LibraryRepository extends ChangeNotifier {
     _schedulePersist();
   }
 
-  Future<void> resetProgress(String bookId) async {
-    final index = _books.indexWhere((item) => item.id == bookId);
-    if (index < 0) return;
-    final book = _books[index];
-    final firstTitle = book.lastChapterTitle;
-    _books[index] = book.copyWith(
-      progress: const ReadingProgress(),
-      lastChapterTitle: firstTitle,
-    );
-    _dirtyBooks.add(bookId);
+  Future<void> resetProgress(String bookId) async =>
+      resetBooksProgress([bookId]);
+
+  Future<void> resetBooksProgress(Iterable<String> bookIds) async {
+    final idSet = bookIds.toSet();
+    if (idSet.isEmpty) return;
+    var changed = false;
+    for (var i = 0; i < _books.length; i++) {
+      final book = _books[i];
+      if (!idSet.contains(book.id)) continue;
+      _books[i] = book.copyWith(
+        progress: const ReadingProgress(),
+        lastChapterTitle: book.lastChapterTitle,
+      );
+      _dirtyBooks.add(book.id);
+      changed = true;
+    }
+    if (!changed) return;
     notifyListeners();
     await _persistNow();
   }
 
-  Future<void> deleteBook(Book book) async {
-    _books.removeWhere((item) => item.id == book.id);
-    _dirtyBooks.remove(book.id);
+  Future<void> deleteBook(Book book) async => deleteBooks([book]);
+
+  Future<void> deleteBooks(Iterable<Book> booksToDelete) async {
+    final targets = booksToDelete.toList();
+    if (targets.isEmpty) return;
+    final ids = {for (final b in targets) b.id};
+    _books.removeWhere((item) => ids.contains(item.id));
+    _dirtyBooks.removeAll(ids);
     notifyListeners();
     await _persistNow();
-    final dir = Directory(p.join(_booksDir.path, book.id));
-    await _deleteDirectory(dir);
+    for (final id in ids) {
+      await _deleteDirectory(Directory(p.join(_booksDir.path, id)));
+    }
+    await _refreshStorageMetrics(notify: true);
+  }
+
+  Future<void> _refreshStorageMetrics({required bool notify}) async {
+    try {
+      var total = 0;
+      if (await _libraryFile.exists()) total += await _libraryFile.length();
+      if (await _backupFile.exists()) total += await _backupFile.length();
+      if (await _booksDir.exists()) {
+        await for (final entity
+            in _booksDir.list(recursive: true, followLinks: false)) {
+          if (entity is File) {
+            try {
+              total += await entity.length();
+            } catch (_) {
+              // Ignore concurrent file changes.
+            }
+          }
+        }
+      }
+      var legacyCount = 0;
+      for (final book in _books) {
+        if (await _contentFile(book.id).exists() &&
+            !await _compressedContentFile(book.id).exists()) {
+          legacyCount++;
+        }
+      }
+      _storageBytes = total;
+      _legacyUncompressedCount = legacyCount;
+      if (notify) notifyListeners();
+    } catch (_) {
+      // Keep prior storage metrics on transient I/O errors.
+    }
   }
 
   Future<void> _deleteDirectory(Directory dir) async {
@@ -498,9 +614,11 @@ class LibraryRepository extends ChangeNotifier {
     if (book == null) {
       final index = await _readChapterIndex(_chaptersFile(id));
       if (index == null) return null;
-      final content = _contentFile(id);
-      final size = await content.length();
-      final stamp = await content.lastModified();
+      final gz = _compressedContentFile(id);
+      final legacy = _contentFile(id);
+      final target = await gz.exists() ? gz : legacy;
+      final size = await target.length();
+      final stamp = await target.lastModified();
       book = Book(
         id: id,
         title: sequence == 1 ? '找回的书籍' : '找回的书籍 $sequence',
@@ -528,9 +646,12 @@ class LibraryRepository extends ChangeNotifier {
   }
 
   String _friendlyError(Object error) {
+    if (error is FormatException && error.message.trim().isNotEmpty) {
+      return error.message;
+    }
     final text = error.toString();
     if (text.contains('FileSystemException')) return '无法读取文件';
-    if (text.contains('FormatException')) return '文件编码无法识别';
+    if (text.contains('FormatException')) return '文件编码或格式无法识别';
     if (text.length > 120) return text.substring(0, 120);
     return text;
   }
@@ -540,4 +661,24 @@ class LibraryRepository extends ChangeNotifier {
     _saveTimer?.cancel();
     super.dispose();
   }
+}
+
+class _ParsedImportPayload {
+  const _ParsedImportPayload({
+    required this.title,
+    required this.author,
+    required this.encoding,
+    required this.charCount,
+    required this.sourceBytes,
+    required this.chapters,
+    required this.compressedContent,
+  });
+
+  final String title;
+  final String author;
+  final String encoding;
+  final int charCount;
+  final int sourceBytes;
+  final List<Chapter> chapters;
+  final List<int> compressedContent;
 }

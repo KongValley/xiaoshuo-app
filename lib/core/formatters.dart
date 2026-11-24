@@ -80,12 +80,54 @@ class Fmt {
 
   static String _two(int value) => value.toString().padLeft(2, '0');
 
+  static const List<String> supportedExtensions = [
+    '.txt',
+    '.epub',
+    '.mobi',
+    '.azw',
+    '.azw3',
+    '.prc',
+    '.pdf',
+    '.docx',
+    '.doc',
+  ];
+
   static String fileName(String path) {
     final normalized = path.replaceAll('\\', '/');
     final index = normalized.lastIndexOf('/');
     return index < 0 ? normalized : normalized.substring(index + 1);
   }
 
-  static bool isTxtFile(String path) =>
-      path.toLowerCase().endsWith('.txt');
+  static String lowerExtension(String path) {
+    final name = fileName(path).toLowerCase();
+    final dot = name.lastIndexOf('.');
+    return dot < 0 ? '' : name.substring(dot);
+  }
+
+  static bool isTxtFile(String path) => lowerExtension(path) == '.txt';
+
+  static bool isSupportedBookFile(String path) =>
+      supportedExtensions.contains(lowerExtension(path));
+
+  static String formatTagForPath(String path) {
+    switch (lowerExtension(path)) {
+      case '.epub':
+        return 'EPUB';
+      case '.mobi':
+      case '.prc':
+        return 'MOBI';
+      case '.azw':
+        return 'AZW';
+      case '.azw3':
+        return 'AZW3';
+      case '.pdf':
+        return 'PDF';
+      case '.docx':
+        return 'DOCX';
+      case '.doc':
+        return 'WORD';
+      default:
+        return 'TXT';
+    }
+  }
 }

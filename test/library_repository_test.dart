@@ -57,7 +57,7 @@ void main() {
       expect(book.charCount, greaterThan(0));
       expect(library.books, hasLength(1));
 
-      final contentPath = p.join(root.path, 'books', book.id, 'content.txt');
+      final contentPath = p.join(root.path, 'books', book.id, 'content.txt.gz');
       expect(File(contentPath).existsSync(), isTrue);
 
       final duplicate = await library.importPaths([sourcePath]);

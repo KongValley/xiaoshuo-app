@@ -50,8 +50,8 @@ void main() {
 
     expect(find.text('书架'), findsOneWidget);
     expect(find.text('书架还是空的'), findsOneWidget);
-    expect(find.text('选择 TXT 文件'), findsOneWidget);
-    expect(find.text('导入 TXT'), findsOneWidget);
+    expect(find.text('选择本地书籍'), findsOneWidget);
+    expect(find.text('导入书籍'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });

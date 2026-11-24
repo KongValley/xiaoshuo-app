@@ -170,7 +170,7 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
         }
         if (entity is Directory) {
           folders.add(entity);
-        } else if (entity is File && Fmt.isTxtFile(name)) {
+        } else if (entity is File && Fmt.isSupportedBookFile(name)) {
           int size = 0;
           DateTime? modified;
           try {
@@ -424,7 +424,7 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '导入本地小说',
+                  '导入本地书籍',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: AppTheme.serif(
@@ -452,8 +452,8 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
               border: Border.all(color: surface.hairline),
             ),
             child: Text(
-              '仅显示 .txt',
-              style: TextStyle(fontSize: 11, color: surface.muted),
+              'TXT · EPUB · MOBI · PDF · Word',
+              style: TextStyle(fontSize: 10.5, color: surface.muted),
             ),
           ),
         ],
@@ -763,12 +763,12 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
             Icon(Icons.folder_open_rounded, size: 44, color: surface.muted),
             const SizedBox(height: 14),
             Text(
-              '这个文件夹里没有 TXT 文件',
+              '这个文件夹里没有受支持的书籍文件',
               style: TextStyle(fontSize: 14, color: theme.colorScheme.onSurface),
             ),
             const SizedBox(height: 6),
             Text(
-              '可以返回上一级，或在左侧换一个位置',
+              '支持 TXT、EPUB、MOBI、AZW3、PDF、Word (.docx / .doc)',
               style: TextStyle(fontSize: 11.5, color: surface.muted),
             ),
           ],
@@ -973,7 +973,7 @@ class _FileBrowserPageState extends State<FileBrowserPage> {
               message: names,
               waitDuration: const Duration(milliseconds: 500),
               child: Text(
-                count > 0 ? '已选择 $count 个：$names' : '请选择一个或多个 TXT 文件',
+                count > 0 ? '已选择 $count 个：$names' : '请选择一个或多个电子书或文档',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -1179,7 +1179,15 @@ class _FileTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = p.basename(entry.file.path);
+    final formatTag = Fmt.formatTagForPath(entry.file.path);
+    final fileIcon = switch (formatTag) {
+      'PDF' => Icons.picture_as_pdf_outlined,
+      'DOCX' || 'WORD' => Icons.description_outlined,
+      'EPUB' || 'MOBI' || 'AZW' || 'AZW3' => Icons.menu_book_outlined,
+      _ => Icons.article_outlined,
+    };
     final meta = <String>[
+      formatTag,
       Fmt.fileSize(entry.size),
       if (entry.modified != null) Fmt.date(entry.modified!),
     ].join('  ·  ');
@@ -1215,7 +1223,7 @@ class _FileTile extends StatelessWidget {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
-                      Icons.article_outlined,
+                      fileIcon,
                       size: 18,
                       color: selected
                           ? theme.colorScheme.primary

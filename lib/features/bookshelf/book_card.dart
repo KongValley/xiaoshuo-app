@@ -140,7 +140,7 @@ class BookCoverArt extends StatelessWidget {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          'TXT',
+                          book.formatTag,
                           style: TextStyle(
                             fontSize: compact ? 7.5 : 8.5,
                             letterSpacing: 1.1,
@@ -241,6 +241,9 @@ class BookCard extends StatefulWidget {
     required this.onInfo,
     required this.onResetProgress,
     required this.onDelete,
+    this.selectionMode = false,
+    this.selected = false,
+    this.onToggleSelect,
   });
 
   final Book book;
@@ -248,6 +251,9 @@ class BookCard extends StatefulWidget {
   final VoidCallback onInfo;
   final VoidCallback onResetProgress;
   final VoidCallback onDelete;
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback? onToggleSelect;
 
   @override
   State<BookCard> createState() => _BookCardState();
@@ -299,25 +305,36 @@ class _BookCardState extends State<BookCard> {
     final surface = theme.extension<AppSurface>()!;
     final book = widget.book;
     final progress = book.progress.percent.clamp(0.0, 1.0);
+    final selecting = widget.selectionMode;
+    final isSelected = selecting && widget.selected;
 
     return Semantics(
       button: true,
-      label: '打开《${book.title}》',
+      selected: isSelected,
+      label: selecting
+          ? '${isSelected ? '取消选择' : '选择'}《${book.title}》'
+          : '打开《${book.title}》',
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovering = true),
         onExit: (_) => setState(() => _hovering = false),
         child: GestureDetector(
-          onTap: widget.onOpen,
-          onSecondaryTapDown: (details) =>
-              _showContextMenu(details.globalPosition),
-          onLongPressStart: (details) =>
-              _showContextMenu(details.globalPosition),
+          onTap: selecting ? (widget.onToggleSelect ?? widget.onOpen) : widget.onOpen,
+          onSecondaryTapDown: selecting
+              ? null
+              : (details) => _showContextMenu(details.globalPosition),
+          onLongPressStart: selecting
+              ? null
+              : (details) => _showContextMenu(details.globalPosition),
           behavior: HitTestBehavior.opaque,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
-            transform: Matrix4.translationValues(0, _hovering ? -4.0 : 0.0, 0),
+            transform: Matrix4.translationValues(
+              0,
+              (!selecting && _hovering) ? -4.0 : 0.0,
+              0,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -327,6 +344,12 @@ class _BookCardState extends State<BookCard> {
                     curve: Curves.easeOutCubic,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(15),
+                      border: isSelected
+                          ? Border.all(
+                              color: theme.colorScheme.primary,
+                              width: 2.5,
+                            )
+                          : null,
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(
@@ -340,69 +363,74 @@ class _BookCardState extends State<BookCard> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        BookCoverArt(book: book, borderRadius: 15),
+                        BookCoverArt(book: book, borderRadius: isSelected ? 12 : 15),
                         Positioned(
                           right: 8,
                           top: 8,
-                          child: AnimatedOpacity(
-                            opacity: _hovering ? 1.0 : 0.78,
-                            duration: const Duration(milliseconds: 140),
-                            child: _MenuButton(
-                              book: book,
-                              onSelected: _handleAction,
-                            ),
-                          ),
+                          child: selecting
+                              ? _SelectionBadge(
+                                  selected: isSelected,
+                                  theme: theme,
+                                )
+                              : AnimatedOpacity(
+                                  opacity: _hovering ? 1.0 : 0.78,
+                                  duration: const Duration(milliseconds: 140),
+                                  child: _MenuButton(
+                                    book: book,
+                                    onSelected: _handleAction,
+                                  ),
+                                ),
                         ),
-                        // Subtle reading action pill revealed on desktop hover.
-                        Positioned(
-                          right: 12,
-                          bottom: 14,
-                          child: IgnorePointer(
-                            child: AnimatedOpacity(
-                              opacity: _hovering ? 1 : 0,
-                              duration: const Duration(milliseconds: 150),
-                              child: AnimatedSlide(
-                                offset: _hovering
-                                    ? Offset.zero
-                                    : const Offset(0, 0.2),
-                                duration: const Duration(milliseconds: 160),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 9,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.42),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.22),
+                        if (!selecting)
+                          Positioned(
+                            right: 12,
+                            bottom: 14,
+                            child: IgnorePointer(
+                              child: AnimatedOpacity(
+                                opacity: _hovering ? 1 : 0,
+                                duration: const Duration(milliseconds: 150),
+                                child: AnimatedSlide(
+                                  offset: _hovering
+                                      ? Offset.zero
+                                      : const Offset(0, 0.2),
+                                  duration: const Duration(milliseconds: 160),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 9,
+                                      vertical: 4,
                                     ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        book.progress.isStarted ? '续读' : '阅读',
-                                        style: const TextStyle(
-                                          fontSize: 10.5,
-                                          fontWeight: FontWeight.w600,
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.42),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.22),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          book.progress.isStarted ? '续读' : '阅读',
+                                          style: const TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 2),
+                                        const Icon(
+                                          Icons.arrow_forward_rounded,
+                                          size: 11,
                                           color: Colors.white,
                                         ),
-                                      ),
-                                      const SizedBox(width: 2),
-                                      const Icon(
-                                        Icons.arrow_forward_rounded,
-                                        size: 11,
-                                        color: Colors.white,
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -481,6 +509,9 @@ class BookListTile extends StatefulWidget {
     required this.onInfo,
     required this.onResetProgress,
     required this.onDelete,
+    this.selectionMode = false,
+    this.selected = false,
+    this.onToggleSelect,
   });
 
   final Book book;
@@ -488,6 +519,9 @@ class BookListTile extends StatefulWidget {
   final VoidCallback onInfo;
   final VoidCallback onResetProgress;
   final VoidCallback onDelete;
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback? onToggleSelect;
 
   @override
   State<BookListTile> createState() => _BookListTileState();
@@ -541,31 +575,43 @@ class _BookListTileState extends State<BookListTile> {
     final progress = book.progress.percent.clamp(0.0, 1.0);
     final remainingChars =
         ((1.0 - progress) * book.charCount).round().clamp(0, book.charCount);
+    final selecting = widget.selectionMode;
+    final isSelected = selecting && widget.selected;
 
     return Semantics(
       button: true,
-      label: '打开《${book.title}》',
+      selected: isSelected,
+      label: selecting
+          ? '${isSelected ? '取消选择' : '选择'}《${book.title}》'
+          : '打开《${book.title}》',
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovering = true),
         onExit: (_) => setState(() => _hovering = false),
         child: GestureDetector(
-          onSecondaryTapDown: (details) =>
-              _showContextMenu(details.globalPosition),
-          onLongPressStart: (details) =>
-              _showContextMenu(details.globalPosition),
+          onSecondaryTapDown: selecting
+              ? null
+              : (details) => _showContextMenu(details.globalPosition),
+          onLongPressStart: selecting
+              ? null
+              : (details) => _showContextMenu(details.globalPosition),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             decoration: BoxDecoration(
-              color: _hovering ? surface.elevated : surface.card,
+              color: isSelected
+                  ? theme.colorScheme.primary.withValues(alpha: 0.08)
+                  : (_hovering ? surface.elevated : surface.card),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: _hovering
-                    ? theme.colorScheme.primary.withValues(alpha: 0.35)
-                    : surface.hairline,
+                color: isSelected
+                    ? theme.colorScheme.primary
+                    : (_hovering
+                        ? theme.colorScheme.primary.withValues(alpha: 0.35)
+                        : surface.hairline),
+                width: isSelected ? 1.6 : 1,
               ),
               boxShadow: [
-                if (_hovering)
+                if (_hovering && !selecting)
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.06),
                     blurRadius: 16,
@@ -576,7 +622,9 @@ class _BookListTileState extends State<BookListTile> {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: widget.onOpen,
+                onTap: selecting
+                    ? (widget.onToggleSelect ?? widget.onOpen)
+                    : widget.onOpen,
                 borderRadius: BorderRadius.circular(16),
                 child: Padding(
                   padding: const EdgeInsets.all(14),
@@ -663,7 +711,7 @@ class _BookListTileState extends State<BookListTile> {
                             ),
                             const SizedBox(height: 5),
                             Text(
-                              '${book.displayAuthor} · ${book.chapterCount} 章 · ${Fmt.charCount(book.charCount)}',
+                              '${book.displayAuthor} · ${book.formatTag} · ${book.chapterCount} 章 · ${Fmt.charCount(book.charCount)}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -722,11 +770,13 @@ class _BookListTileState extends State<BookListTile> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      _MenuButton(
-                        book: book,
-                        onSelected: _handleAction,
-                        lightHost: true,
-                      ),
+                      selecting
+                          ? _SelectionBadge(selected: isSelected, theme: theme)
+                          : _MenuButton(
+                              book: book,
+                              onSelected: _handleAction,
+                              lightHost: true,
+                            ),
                     ],
                   ),
                 ),
@@ -734,6 +784,38 @@ class _BookListTileState extends State<BookListTile> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SelectionBadge extends StatelessWidget {
+  const _SelectionBadge({required this.selected, required this.theme});
+
+  final bool selected;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: selected
+            ? theme.colorScheme.primary
+            : Colors.black.withValues(alpha: 0.28),
+        border: Border.all(
+          color: selected
+              ? theme.colorScheme.primary
+              : Colors.white.withValues(alpha: 0.72),
+          width: 1.5,
+        ),
+      ),
+      child: Icon(
+        selected ? Icons.check_rounded : Icons.circle_outlined,
+        size: selected ? 17 : 15,
+        color: Colors.white.withValues(alpha: selected ? 1.0 : 0.7),
       ),
     );
   }

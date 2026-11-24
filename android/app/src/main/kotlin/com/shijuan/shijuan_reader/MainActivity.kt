@@ -26,14 +26,18 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "pickTxtFiles" -> openTxtPicker(result)
+                    "pickTxtFiles", "pickBookFiles" -> openBookPicker(result)
+                    "clearImportCache" -> {
+                        clearImportCache()
+                        result.success(null)
+                    }
                     "getFilesDir" -> result.success(filesDir.absolutePath)
                     else -> result.notImplemented()
                 }
             }
     }
 
-    private fun openTxtPicker(result: MethodChannel.Result) {
+    private fun openBookPicker(result: MethodChannel.Result) {
         if (pendingPicker != null) {
             result.error("busy", "文件选择器已经打开", null)
             return
@@ -42,10 +46,6 @@ class MainActivity : FlutterActivity() {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-            putExtra(
-                Intent.EXTRA_MIME_TYPES,
-                arrayOf("text/plain", "text/*", "application/octet-stream"),
-            )
         }
         pendingPicker = result
         try {
@@ -53,6 +53,15 @@ class MainActivity : FlutterActivity() {
         } catch (error: Exception) {
             pendingPicker = null
             result.error("picker", error.message, null)
+        }
+    }
+
+    private fun clearImportCache() {
+        try {
+            val rootDir = File(cacheDir, "novel_imports")
+            rootDir.listFiles()?.forEach { it.deleteRecursively() }
+        } catch (_: Exception) {
+            // Best-effort cache cleanup.
         }
     }
 
@@ -79,10 +88,9 @@ class MainActivity : FlutterActivity() {
                 data.data?.let { uris.add(it) }
             }
 
-            val rootDir = File(cacheDir, "novel_imports")
-            rootDir.listFiles()?.forEach { it.deleteRecursively() }
+            clearImportCache()
             val targetDir = File(
-                rootDir,
+                File(cacheDir, "novel_imports"),
                 System.currentTimeMillis().toString(),
             )
             targetDir.mkdirs()
@@ -90,8 +98,9 @@ class MainActivity : FlutterActivity() {
             val paths = mutableListOf<String>()
             for (uri in uris) {
                 val displayName = queryDisplayName(uri)
-                    ?: "novel_${System.currentTimeMillis()}.txt"
-                if (!displayName.lowercase().endsWith(".txt")) continue
+                    ?: "book_${System.currentTimeMillis()}.txt"
+                val lower = displayName.lowercase()
+                if (SUPPORTED_EXTS.none { lower.endsWith(it) }) continue
                 val safeName = displayName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
                 val target = uniqueFile(targetDir, safeName)
                 contentResolver.openInputStream(uri)?.use { input ->
@@ -137,5 +146,16 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val CHANNEL = "shijuan/native"
         private const val REQUEST_PICK_TXT = 0x534A
+        private val SUPPORTED_EXTS = listOf(
+            ".txt",
+            ".epub",
+            ".mobi",
+            ".azw",
+            ".azw3",
+            ".prc",
+            ".pdf",
+            ".docx",
+            ".doc",
+        )
     }
 }
